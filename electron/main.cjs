@@ -16,6 +16,7 @@ autoUpdater.requestHeaders = {
 let mainWindow = null;
 let tray = null;
 let checkInterval = null;
+let isCheckingServer = false;
 
 const isDev = !app.isPackaged;
 const DEFAULT_PORT = 3001;
@@ -113,11 +114,15 @@ function loadAppWhenReady(window) {
   // Render a simple loading page first to prevent white flash/error
   window.loadFile(path.join(__dirname, 'loading.html'));
 
+  isCheckingServer = false;
   if (checkInterval) {
     clearInterval(checkInterval);
   }
 
   const startCheckingServer = () => {
+    if (isCheckingServer) return;
+    isCheckingServer = true;
+
     const check = () => {
       if (serverUrl.trim().toLowerCase() === 'discovery') {
         const appKey = '4vhnafof';
