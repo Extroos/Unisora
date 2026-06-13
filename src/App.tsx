@@ -30,9 +30,18 @@ export default function App() {
     isNotificationsOpen, setNotificationsOpen, voiceState, channels, 
     activeChannelId, activeServerId, activeDmId, isRightSidebarOpen, 
     bootstrap, systemConfig, servers, updatePresence, fetchFriends,
-    callState, acceptCall, declineCall, users, dmChannels
+    callState, acceptCall, declineCall, users, dmChannels, notifications
   } = useAppStore();
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+
+  // Sync unread notification count to Electron taskbar badge count
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
+    if (isElectron) {
+      const unreadCount = notifications.filter((n: any) => !n.read).length;
+      (window as any).electronAPI.setBadgeCount(unreadCount);
+    }
+  }, [notifications]);
 
   const sseRef = React.useRef<EventSource | null>(null);
   const wsRef = React.useRef<WebSocket | null>(null);

@@ -17,6 +17,17 @@ export function SettingsModal() {
   const [profileBannerUrl, setProfileBannerUrl] = React.useState(currentUser?.bannerUrl || '');
   const [profileThemeColor, setProfileThemeColor] = React.useState(currentUser?.themeColor || '');
 
+  const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
+  const [launchOnStartup, setLaunchOnStartupState] = React.useState(false);
+  const [minimizeToTraySettings, setMinimizeToTrayState] = React.useState(true);
+
+  React.useEffect(() => {
+    if (isSettingsOpen && isElectron) {
+      (window as any).electronAPI.getLaunchOnStartup().then((val: boolean) => setLaunchOnStartupState(val));
+      (window as any).electronAPI.getMinimizeToTray().then((val: boolean) => setMinimizeToTrayState(val));
+    }
+  }, [isSettingsOpen, isElectron]);
+
   React.useEffect(() => {
     if (isSettingsOpen && currentUser) {
       setProfileName(currentUser.username || '');
@@ -57,6 +68,7 @@ export function SettingsModal() {
     { id: 'profile', label: 'Profiles', icon: Paintbrush },
     { id: 'privacy', label: 'Privacy & Safety', icon: Shield },
     { id: 'divider1', divider: true },
+    ...(isElectron ? [{ id: 'desktopSettings', label: 'Windows Settings', icon: Monitor }] : []),
     { id: 'appearance', label: 'Appearance', icon: Monitor },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'voice', label: 'Voice & Audio', icon: Volume2 },
@@ -315,6 +327,55 @@ export function SettingsModal() {
                             <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all shadow-sm", compactMode ? "left-5" : "left-1")} />
                           </button>
                         </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Windows Settings Tab ── */}
+                {activeTab === 'desktopSettings' && (
+                  <div className="space-y-6 animate-fade-in-up font-sans select-none">
+                    <div>
+                      <h3 className="text-lg font-bold text-text-primary mb-1">Windows Settings</h3>
+                      <p className="text-xs text-text-muted">Configure desktop application integrations and window control styles.</p>
+                    </div>
+                    <div className="bg-surface-2 border border-border rounded-xl p-4 space-y-4 shadow-sm">
+                      {/* Launch on Startup Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h5 className="text-sm font-medium text-text-secondary">Launch on Startup</h5>
+                          <p className="text-[11px] text-text-muted mt-0.5">Automatically open Unisora when you sign into your computer.</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const val = !launchOnStartup;
+                            setLaunchOnStartupState(val);
+                            (window as any).electronAPI.setLaunchOnStartup(val);
+                          }}
+                          className={cn("w-10 h-6 rounded-full relative cursor-pointer transition-colors duration-150", launchOnStartup ? "bg-accent" : "bg-surface-4")}
+                        >
+                          <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all duration-150 shadow-sm", launchOnStartup ? "left-5" : "left-1")} />
+                        </button>
+                      </div>
+
+                      <div className="h-px bg-border/40" />
+
+                      {/* Close to Tray Toggle */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h5 className="text-sm font-medium text-text-secondary">Minimize to System Tray on Close</h5>
+                          <p className="text-[11px] text-text-muted mt-0.5">Keep Unisora running in the background when the main window is closed.</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            const val = !minimizeToTraySettings;
+                            setMinimizeToTrayState(val);
+                            (window as any).electronAPI.setMinimizeToTray(val);
+                          }}
+                          className={cn("w-10 h-6 rounded-full relative cursor-pointer transition-colors duration-150", minimizeToTraySettings ? "bg-accent" : "bg-surface-4")}
+                        >
+                          <div className={cn("absolute top-1 w-4 h-4 bg-white rounded-full transition-all duration-150 shadow-sm", minimizeToTraySettings ? "left-5" : "left-1")} />
+                        </button>
                       </div>
                     </div>
                   </div>

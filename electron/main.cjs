@@ -17,6 +17,8 @@ let mainWindow = null;
 let tray = null;
 let checkInterval = null;
 let isCheckingServer = false;
+let minimizeToTray = true;
+let appIsQuitting = false;
 
 const isDev = !app.isPackaged;
 const DEFAULT_PORT = 3001;
@@ -31,6 +33,9 @@ function loadServerConfig() {
       if (data.serverUrl) {
         serverUrl = data.serverUrl;
       }
+      if (data.minimizeToTray !== undefined) {
+        minimizeToTray = data.minimizeToTray;
+      }
     } catch (err) {
       console.error('Failed to parse server config:', err);
     }
@@ -41,10 +46,24 @@ function loadServerConfig() {
 function saveServerConfig(newUrl) {
   const configPath = path.join(app.getPath('userData'), 'server-config.json');
   try {
-    fs.writeFileSync(configPath, JSON.stringify({ serverUrl: newUrl }), 'utf8');
+    const data = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    data.serverUrl = newUrl;
+    fs.writeFileSync(configPath, JSON.stringify(data), 'utf8');
     serverUrl = newUrl;
   } catch (err) {
     console.error('Failed to save server config:', err);
+  }
+}
+
+function saveMinimizeToTray(enable) {
+  const configPath = path.join(app.getPath('userData'), 'server-config.json');
+  try {
+    const data = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    data.minimizeToTray = enable;
+    fs.writeFileSync(configPath, JSON.stringify(data), 'utf8');
+    minimizeToTray = enable;
+  } catch (err) {
+    console.error('Failed to save minimizeToTray config:', err);
   }
 }
 
@@ -249,7 +268,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      spellcheck: true
     }
   });
 
@@ -261,17 +281,44 @@ function createWindow() {
     .replace(/Unisora\/\S+\s?/g, '');
   mainWindow.webContents.setUserAgent(userAgent);
 
-  // Allow Ctrl+Shift+I to open DevTools in production for debugging
+  // Keyboard Shortcuts (Ctrl+Shift+I for DevTools, zoom controls)
   mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
-      if (input.type === 'keyDown') {
-        mainWindow.webContents.toggleDevTools();
+    if (input.control || input.meta) {
+      if (input.shift && input.key.toLowerCase() === 'i') {
+        if (input.type === 'keyDown') {
+          mainWindow.webContents.toggleDevTools();
+        }
+        event.preventDefault();
+      } else if (input.key === '=' || input.key === '+') {
+        if (input.type === 'keyDown') {
+          const currentZoom = mainWindow.webContents.getZoomLevel();
+          mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+        }
+        event.preventDefault();
+      } else if (input.key === '-') {
+        if (input.type === 'keyDown') {
+          const currentZoom = mainWindow.webContents.getZoomLevel();
+          mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+        }
+        event.preventDefault();
+      } else if (input.key === '0') {
+        if (input.type === 'keyDown') {
+          mainWindow.webContents.setZoomLevel(0);
+        }
+        event.preventDefault();
       }
-      event.preventDefault();
     }
   });
 
   loadAppWhenReady(mainWindow);
+
+  // Close to Tray support
+  mainWindow.on('close', (event) => {
+    if (minimizeToTray && !appIsQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -325,6 +372,35 @@ ipcMain.on('set-server-url', (event, newUrl) => {
   saveServerConfig(newUrl);
   if (mainWindow) {
     loadAppWhenReady(mainWindow);
+  }
+});
+
+ipcMain.on('set-launch-on-startup', (event, enable) => {
+  app.setLoginItemSettings({
+    openAtLogin: enable,
+    path: app.getPath('exe')
+  });
+});
+
+ipcMain.handle('get-launch-on-startup', () => {
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.on('set-minimize-to-tray', (event, enable) => {
+  saveMinimizeToTray(enable);
+});
+
+ipcMain.handle('get-minimize-to-tray', () => {
+  return minimizeToTray;
+});
+
+ipcMain.on('set-badge-count', (event, count) => {
+  if (typeof app.setBadgeCount === 'function') {
+    app.setBadgeCount(count);
   }
 });
 

@@ -10,5 +10,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   maximizeWindow: () => ipcRenderer.send('window-maximize'),
   closeWindow: () => ipcRenderer.send('window-close'),
-  appVersion: ipcRenderer.sendSync('get-app-version')
+  appVersion: ipcRenderer.sendSync('get-app-version'),
+  setLaunchOnStartup: (enable) => ipcRenderer.send('set-launch-on-startup', enable),
+  getLaunchOnStartup: () => ipcRenderer.invoke('get-launch-on-startup'),
+  setMinimizeToTray: (enable) => ipcRenderer.send('set-minimize-to-tray', enable),
+  getMinimizeToTray: () => ipcRenderer.invoke('get-minimize-to-tray'),
+  setBadgeCount: (count) => ipcRenderer.send('set-badge-count', count)
 });
