@@ -37,7 +37,7 @@ export default function App() {
   // Sync unread notification count to Electron taskbar badge count
   useEffect(() => {
     const isElectron = typeof window !== 'undefined' && !!(window as any).electronAPI;
-    if (isElectron) {
+    if (isElectron && (window as any).electronAPI.setBadgeCount) {
       const unreadCount = notifications.filter((n: any) => !n.read).length;
       (window as any).electronAPI.setBadgeCount(unreadCount);
     }

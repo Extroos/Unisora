@@ -23,8 +23,12 @@ export function SettingsModal() {
 
   React.useEffect(() => {
     if (isSettingsOpen && isElectron) {
-      (window as any).electronAPI.getLaunchOnStartup().then((val: boolean) => setLaunchOnStartupState(val));
-      (window as any).electronAPI.getMinimizeToTray().then((val: boolean) => setMinimizeToTrayState(val));
+      if ((window as any).electronAPI.getLaunchOnStartup) {
+        (window as any).electronAPI.getLaunchOnStartup().then((val: boolean) => setLaunchOnStartupState(val));
+      }
+      if ((window as any).electronAPI.getMinimizeToTray) {
+        (window as any).electronAPI.getMinimizeToTray().then((val: boolean) => setMinimizeToTrayState(val));
+      }
     }
   }, [isSettingsOpen, isElectron]);
 
@@ -350,7 +354,9 @@ export function SettingsModal() {
                           onClick={() => {
                             const val = !launchOnStartup;
                             setLaunchOnStartupState(val);
-                            (window as any).electronAPI.setLaunchOnStartup(val);
+                            if ((window as any).electronAPI.setLaunchOnStartup) {
+                              (window as any).electronAPI.setLaunchOnStartup(val);
+                            }
                           }}
                           className={cn("w-10 h-6 rounded-full relative cursor-pointer transition-colors duration-150", launchOnStartup ? "bg-accent" : "bg-surface-4")}
                         >
@@ -370,7 +376,9 @@ export function SettingsModal() {
                           onClick={() => {
                             const val = !minimizeToTraySettings;
                             setMinimizeToTrayState(val);
-                            (window as any).electronAPI.setMinimizeToTray(val);
+                            if ((window as any).electronAPI.setMinimizeToTray) {
+                              (window as any).electronAPI.setMinimizeToTray(val);
+                            }
                           }}
                           className={cn("w-10 h-6 rounded-full relative cursor-pointer transition-colors duration-150", minimizeToTraySettings ? "bg-accent" : "bg-surface-4")}
                         >
