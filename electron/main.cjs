@@ -313,6 +313,10 @@ function createTray() {
 }
 
 // IPC Handlers
+ipcMain.on('get-app-version', (event) => {
+  event.returnValue = app.getVersion();
+});
+
 ipcMain.handle('get-server-url', () => {
   return serverUrl;
 });

@@ -10,5 +10,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   maximizeWindow: () => ipcRenderer.send('window-maximize'),
   closeWindow: () => ipcRenderer.send('window-close'),
-  appVersion: require('../package.json').version
+  appVersion: ipcRenderer.sendSync('get-app-version')
 });
