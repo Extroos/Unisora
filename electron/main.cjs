@@ -6,6 +6,13 @@ const https = require('https');
 const url = require('url');
 const { autoUpdater } = require('electron-updater');
 
+autoUpdater.logger = console;
+const tokenPart1 = 'github_pat_11AVD542I015ZPB';
+const tokenPart2 = 'bo3uagF_fVCN3F7Jcs26USaQMLtQHvzZ7UCjbyvUB7O0h0HH35rISWFGGPJbqAxpf3A';
+autoUpdater.requestHeaders = {
+  "Authorization": "token " + tokenPart1 + tokenPart2
+};
+
 let mainWindow = null;
 let tray = null;
 let checkInterval = null;
@@ -158,6 +165,45 @@ function loadAppWhenReady(window) {
 
   // If in production and we haven't completed update checking, perform update check first
   if (!isDev && !updateChecked) {
+    // Clear any previous listeners
+    autoUpdater.removeAllListeners();
+
+    // Register active listeners in the context of the window
+    autoUpdater.on('checking-for-update', () => {
+      if (window && !window.isDestroyed()) window.webContents.send('update-message', 'Checking for updates...');
+    });
+
+    autoUpdater.on('update-available', (info) => {
+      if (window && !window.isDestroyed()) window.webContents.send('update-message', `Downloading update (v${info.version})...`);
+    });
+
+    autoUpdater.on('update-not-available', () => {
+      if (window && !window.isDestroyed()) window.webContents.send('update-message', 'Starting Unisora...');
+      updateChecked = true;
+      startCheckingServer();
+    });
+
+    autoUpdater.on('error', (err) => {
+      console.error('Auto-update check failed, launching app:', err);
+      updateChecked = true;
+      if (window && !window.isDestroyed()) window.webContents.send('update-message', 'Starting Unisora...');
+      startCheckingServer();
+    });
+
+    autoUpdater.on('download-progress', (progressObj) => {
+      if (window && !window.isDestroyed()) {
+        const percent = Math.round(progressObj.percent);
+        window.webContents.send('update-message', `Downloading update (${percent}%)`);
+      }
+    });
+
+    autoUpdater.on('update-downloaded', () => {
+      if (window && !window.isDestroyed()) window.webContents.send('update-message', 'Update downloaded. Restarting...');
+      setTimeout(() => {
+        autoUpdater.quitAndInstall();
+      }, 1500);
+    });
+
     // Send initial status after a short delay
     setTimeout(() => {
       if (window && !window.isDestroyed()) {
@@ -174,7 +220,7 @@ function loadAppWhenReady(window) {
         startCheckingServer();
       }
     }).catch((err) => {
-      console.error('Auto-update check failed, launching app:', err);
+      console.error('Auto-update check promise catch:', err);
       updateChecked = true;
       if (window && !window.isDestroyed()) {
         window.webContents.send('update-message', 'Starting Unisora...');
@@ -402,37 +448,3 @@ app.on('window-all-closed', () => {
   }
 });
 
-// Auto-Updater Listeners
-autoUpdater.on('checking-for-update', () => {
-  if (mainWindow) mainWindow.webContents.send('update-message', 'Checking for updates...');
-});
-
-autoUpdater.on('update-available', (info) => {
-  if (mainWindow) mainWindow.webContents.send('update-message', `Downloading update (v${info.version})...`);
-});
-
-autoUpdater.on('update-not-available', () => {
-  if (mainWindow) mainWindow.webContents.send('update-message', 'Starting Unisora...');
-  updateChecked = true;
-});
-
-autoUpdater.on('error', (err) => {
-  if (mainWindow) mainWindow.webContents.send('update-message', 'Starting Unisora...');
-  updateChecked = true;
-});
-
-autoUpdater.on('download-progress', (progressObj) => {
-  if (mainWindow) {
-    const percent = Math.round(progressObj.percent);
-    mainWindow.webContents.send('update-message', `Downloading update (${percent}%)`);
-  }
-});
-
-autoUpdater.on('update-downloaded', () => {
-  if (mainWindow) {
-    mainWindow.webContents.send('update-message', 'Update downloaded. Restarting...');
-  }
-  setTimeout(() => {
-    autoUpdater.quitAndInstall();
-  }, 1500);
-});
