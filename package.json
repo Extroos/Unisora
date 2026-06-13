@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.0.6",
+  "version": "1.0.7",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -78,15 +78,15 @@
     ],
     "win": {
       "icon": "electron/icon.png",
-      "target": "nsis"
+      "target": "nsis",
+      "verifyUpdateCodeSignature": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Unisora",
-      "killRunningApp": true
+      "shortcutName": "Unisora"
     },
     "publish": [
       {

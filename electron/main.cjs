@@ -205,7 +205,7 @@ function loadAppWhenReady(window) {
     autoUpdater.on('update-downloaded', () => {
       if (window && !window.isDestroyed()) window.webContents.send('update-message', 'Update downloaded. Restarting...');
       setTimeout(() => {
-        autoUpdater.quitAndInstall();
+        autoUpdater.quitAndInstall(false, true);
       }, 1500);
     });
 
