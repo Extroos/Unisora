@@ -213,7 +213,9 @@ function createWindow() {
   // Allow Ctrl+Shift+I to open DevTools in production for debugging
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.control && input.shift && input.key.toLowerCase() === 'i') {
-      mainWindow.webContents.toggleDevTools();
+      if (input.type === 'keyDown') {
+        mainWindow.webContents.toggleDevTools();
+      }
       event.preventDefault();
     }
   });

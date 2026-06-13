@@ -9,5 +9,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onGoogleOauthCode: (callback) => ipcRenderer.on('google-oauth-code', (event, code) => callback(code)),
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   maximizeWindow: () => ipcRenderer.send('window-maximize'),
-  closeWindow: () => ipcRenderer.send('window-close')
+  closeWindow: () => ipcRenderer.send('window-close'),
+  appVersion: require('../package.json').version
 });

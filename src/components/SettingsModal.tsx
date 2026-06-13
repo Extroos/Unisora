@@ -113,6 +113,9 @@ export function SettingsModal() {
                 );
               })}
             </div>
+            <div className="px-6 pt-4 mt-auto border-t border-white/5 text-[9px] font-black text-text-muted tracking-widest uppercase select-none">
+              Unisora v{(window as any).electronAPI?.appVersion || '1.0.1'}
+            </div>
           </div>
 
           {/* Content Area */}
