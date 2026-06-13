@@ -1,0 +1,201 @@
+datasource db {
+  provider     = "sqlite"
+  relationMode = "prisma"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id              String         @id
+  username        String
+  email           String?
+  tag             String?
+  password        String?
+  googleId        String?
+  avatarUrl       String
+  bannerUrl       String?
+  status          String
+  customStatus    String?
+  bio             String?
+  location        String?
+  joinedAt        String?
+  themeColor      String?
+  needsOnboarding Boolean        @default(false)
+  pronouns        String?
+  activity        String?
+  socialLinks     String?
+  
+  // Relations
+  memberships     ServerMember[]
+}
+
+model Server {
+  id          String         @id
+  name        String
+  description String?
+  iconUrl     String?
+  bannerUrl   String?
+  ownerId     String
+  isFavorite  Boolean        @default(false)
+  order       Int            @default(0)
+  settings    String?        // JSON string of settings: notification preference, mute status, etc.
+  category    String?
+  tags        String?
+  insights    String?
+  
+  // Relations
+  members     ServerMember[]
+  roles       Role[]
+  categories  Category[]
+  channels    Channel[]
+}
+
+model ServerMember {
+  userId   String
+  serverId String
+  joinedAt String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@id([userId, serverId])
+}
+
+model Role {
+  id               String  @id
+  name             String
+  color            String
+  permissions      String  // Stringified JSON array of permissions
+  hoist            Boolean @default(false)
+  autoAssignOnJoin Boolean @default(false)
+  isRestricted     Boolean @default(false)
+  serverId         String
+  
+  server           Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id          String  @id
+  name        String
+  order       Int     @default(0)
+  isCollapsed Boolean @default(false)
+  serverId    String
+  
+  server      Server  @relation(fields: [serverId], references: [id], onDelete: Cascade)
+}
+
+model Channel {
+  id          String    @id
+  serverId    String
+  name        String
+  type        String    // text, voice, announcement, stage
+  categoryId  String?
+  description String?
+  slowMode    Int       @default(0)
+  order       Int       @default(0)
+  nsfw        Boolean   @default(false)
+  isPrivate   Boolean   @default(false)
+  userLimit   Int?
+  bitrate     Int?
+  region      String?
+  isStage     Boolean?  @default(false)
+
+  server      Server    @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages    Message[]
+}
+
+model Message {
+  id          String       @id
+  channelId   String
+  userId      String
+  content     String
+  timestamp   String
+  editedAt    String?
+  replyToId   String?
+  pinned      Boolean      @default(false)
+  poll        String?      // JSON string representation of poll question and options
+
+  channel     Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  reactions   Reaction[]
+  attachments Attachment[]
+}
+
+model Reaction {
+  id        String  @id @default(uuid())
+  emoji     String
+  messageId String
+  userIds   String  // Stringified JSON array of userIds who reacted
+
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model Attachment {
+  id        String  @id @default(uuid())
+  name      String
+  url       String
+  type      String  // image, video, file
+  size      String
+  messageId String
+
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+}
+
+model Thread {
+  id                  String   @id
+  channelId           String
+  name                String
+  ownerId             String?
+  createdAt           String?
+  messageCount        Int      @default(0)
+  memberCount         Int?
+  lastMessageAt       String?
+  autoArchiveDuration Int      @default(60)
+  isPrivate           Boolean  @default(false)
+  isArchived          Boolean  @default(false)
+}
+
+model DmChannel {
+  id           String  @id
+  participants String  // Stringified JSON array of user IDs
+  name         String?
+  avatarUrl    String?
+  ownerId      String
+  createdAt    String
+}
+
+model Notification {
+  id        String  @id
+  userId    String?
+  type      String  // mention, reply, message
+  username  String
+  avatarUrl String
+  content   String
+  channel   String
+  channelId String?
+  serverId  String?
+  time      String
+  read      Boolean @default(false)
+}
+
+model AuditLog {
+  id         String  @id
+  action     String
+  executorId String
+  targetId   String?
+  targetName String?
+  timestamp  String
+  changes    String? // JSON stringified changes array
+  serverId   String
+}
+
+model Friendship {
+  id         String  @id @default(uuid())
+  senderId   String
+  receiverId String
+  status     String  // pending | accepted | rejected | blocked
+  createdAt  String
+
+  @@unique([senderId, receiverId])
+}

@@ -1,0 +1,246 @@
+import { Server, Channel, Message, User, Category, Role, Thread } from '../types';
+
+export const currentUser: User = {
+  id: 'u1',
+  username: 'AlexTheDev',
+  avatarUrl: 'https://i.pravatar.cc/150?u=u1',
+  email: 'alex.dev@nexus.com',
+  status: 'online',
+  customStatus: 'Hardening Administrative Suite',
+  bio: 'Lead Systems Architect focused on high-performance communication protocols and geometric interface stability.',
+  location: 'San Francisco, CA',
+  joinedAt: 'Oct 14, 2023',
+  activity: { name: 'Nexus Studio', type: 'coding', startedAt: new Date(Date.now() - 3600000).toISOString() },
+  socialLinks: [
+    { platform: 'github', url: 'https://github.com/alexdev' },
+    { platform: 'twitter', url: 'https://twitter.com/alexdev' },
+    { platform: 'website', url: 'https://alex.dev' }
+  ]
+};
+
+export const MOCK_USERS: Record<string, User> = {
+  'u5': {
+    id: 'u5',
+    username: 'NexusBot',
+    avatarUrl: 'https://i.pravatar.cc/150?u=u5',
+    status: 'online',
+    customStatus: 'Ready to assist',
+    bio: 'Automated System Intelligence for Nexus HQ.',
+    roles: ['bot'],
+    joinedAt: 'Jan 01, 2024',
+    activity: { name: 'Indexing Global Buffer', type: 'watching', startedAt: new Date().toISOString() }
+  }
+};
+
+const DEFAULT_ROLES: Role[] = [
+  { id: 'r1', name: 'Admin', color: '#ed4245', permissions: ['ADMIN', 'MENTION_EVERYONE'], hoist: true },
+  { id: 'r2', name: 'Moderator', color: '#3498db', permissions: ['MANAGE_MESSAGES', 'KICK_MEMBERS', 'MENTION_EVERYONE'], hoist: true },
+  { id: 'r3', name: 'Member', color: '#99aab5', permissions: [], hoist: false },
+  { id: 'r4', name: 'NexusBot', color: '#5865f2', permissions: ['ADMIN', 'MENTION_EVERYONE'], hoist: true },
+];
+
+export const MOCK_SERVERS: Server[] = [
+  {
+    id: 's1',
+    name: 'Nexus HQ',
+    iconUrl: 'https://images.unsplash.com/photo-1614850523459-c2f4c699c52e?w=150&q=80',
+    ownerId: 'u1',
+    members: ['u1', 'u2', 'u3', 'u4', 'u5'],
+    roles: DEFAULT_ROLES,
+    memberRoles: {
+      'u1': ['r1'],
+      'u2': ['r2'],
+      'u3': ['r3'],
+      'u4': ['r3'],
+      'u5': ['r4'],
+    },
+    auditLogs: [
+      { id: 'l1', action: 'SERVER_UPDATE', executorId: 'u1', targetName: 'Nexus HQ', timestamp: '2026-05-14T10:00:00Z' },
+      { id: 'l2', action: 'CHANNEL_CREATE', executorId: 'u1', targetName: 'rules', timestamp: '2026-05-14T10:05:00Z' }
+    ],
+    insights: { totalMessages: 1240, activeMembers: 12, growthRate: 15 },
+    order: 0
+  },
+  {
+    id: 's2',
+    name: 'React Developers',
+    iconUrl: 'https://images.unsplash.com/photo-1633356122544-f134324a6cee?w=150&q=80',
+    ownerId: 'u3',
+    members: ['u1', 'u3', 'u4'],
+    roles: DEFAULT_ROLES,
+    memberRoles: {
+      'u3': ['r1'],
+      'u1': ['r2'],
+      'u4': ['r3'],
+    },
+    auditLogs: [
+      { id: 'l3', action: 'SERVER_UPDATE', executorId: 'u2', targetName: 'React Developers', timestamp: '2026-05-14T11:00:00Z' }
+    ],
+    insights: { totalMessages: 850, activeMembers: 8, growthRate: 5 },
+    order: 1
+  },
+  {
+    id: 'pub1',
+    name: 'Art & Design Hub',
+    description: 'A place for creatives to share their work and get feedback from peers.',
+    iconUrl: 'https://images.unsplash.com/photo-1558655146-d09347e92766?w=150&q=80',
+    ownerId: 'u2',
+    members: ['u2', 'u3'],
+    roles: DEFAULT_ROLES,
+    memberRoles: { 'u2': ['r1'], 'u3': ['r3'] },
+    auditLogs: [],
+    bannerUrl: 'https://images.unsplash.com/photo-1541462608141-ad4d01947f6d?w=800&q=80',
+    tags: ['Art', 'Design', 'Creative'],
+    category: 'creative',
+    insights: { totalMessages: 500, activeMembers: 50, growthRate: 10 },
+    order: 2
+  },
+  {
+    id: 'pub2',
+    name: 'Tech Enthusiasts',
+    description: 'Discuss the latest in hardware, software, and emerging technologies.',
+    iconUrl: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?w=150&q=80',
+    ownerId: 'u4',
+    members: ['u4', 'u2'],
+    roles: DEFAULT_ROLES,
+    memberRoles: { 'u4': ['r1'], 'u2': ['r2'] },
+    auditLogs: [],
+    bannerUrl: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=80',
+    tags: ['Tech', 'Hardware', 'Software'],
+    category: 'tech',
+    insights: { totalMessages: 200, activeMembers: 20, growthRate: 5 },
+    order: 3
+  },
+  {
+    id: 'pub3',
+    name: 'Competitive Gaming',
+    description: 'Find players for your favorite games and join community tournaments.',
+    iconUrl: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=150&q=80',
+    ownerId: 'u3',
+    members: ['u3', 'u4'],
+    roles: DEFAULT_ROLES,
+    memberRoles: { 'u3': ['r1'], 'u4': ['r3'] },
+    auditLogs: [],
+    bannerUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=800&q=80',
+    tags: ['Gaming', 'Esports', 'Community'],
+    category: 'gaming',
+    insights: { totalMessages: 1000, activeMembers: 100, growthRate: 20 },
+    order: 4
+  },
+  {
+    id: 'pub4',
+    name: 'Scientific Research',
+    description: 'Discuss breakthroughs in physics, biology, and chemistry with experts.',
+    iconUrl: 'https://images.unsplash.com/photo-1518152006812-edab29b069ac?w=150&q=80',
+    ownerId: 'u2',
+    members: ['u2', 'u5'],
+    roles: DEFAULT_ROLES,
+    memberRoles: { 'u2': ['r1'], 'u5': ['r4'] },
+    auditLogs: [],
+    bannerUrl: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?w=800&q=80',
+    tags: ['Science', 'Research', 'Physics'],
+    category: 'education',
+    insights: { totalMessages: 300, activeMembers: 30, growthRate: 12 },
+    order: 5
+  },
+  {
+    id: 's3',
+    name: 'Gaming Lounge',
+    ownerId: 'u4',
+    members: ['u1', 'u2'],
+    roles: DEFAULT_ROLES,
+    memberRoles: {
+      'u4': ['r1'],
+      'u1': ['r3'],
+      'u2': ['r3'],
+    },
+    auditLogs: [],
+    order: 6
+  }
+];
+
+export const MOCK_CATEGORIES: Category[] = [
+  { id: 'c1', serverId: 's1', name: 'Information', order: 0 },
+  { id: 'c2', serverId: 's1', name: 'General', order: 1 },
+  { id: 'c3', serverId: 's1', name: 'Development', order: 2 },
+];
+
+export const MOCK_CHANNELS: Channel[] = [
+  { id: 'ch1', serverId: 's1', categoryId: 'c1', name: 'welcome', type: 'announcement', description: 'Welcome to Nexus HQ!', order: 0 },
+  { id: 'ch2', serverId: 's1', categoryId: 'c1', name: 'announcements', type: 'announcement', order: 1 },
+  { id: 'ch3', serverId: 's1', categoryId: 'c2', name: 'general', type: 'text', description: 'General chat for everyone', order: 0 },
+  { id: 'ch4', serverId: 's1', categoryId: 'c2', name: 'random', type: 'text', order: 1 },
+  { id: 'ch5', serverId: 's1', categoryId: 'c3', name: 'frontend', type: 'text', order: 0 },
+  { id: 'ch6', serverId: 's1', categoryId: 'c3', name: 'design', type: 'text', order: 1 },
+  { id: 'ch7', serverId: 's1', categoryId: 'c3', name: 'Team Sync', type: 'voice', order: 2, userLimit: 10 },
+  { id: 'ch8', serverId: 's2', name: 'general', type: 'text', order: 0 },
+  { id: 'ch9', serverId: 's2', name: 'help', type: 'text', order: 1 },
+];
+
+export const MOCK_THREADS: Thread[] = [
+  { 
+    id: 't1', 
+    channelId: 'ch3', 
+    name: 'Refactoring ChatArea', 
+    messageCount: 12, 
+    memberCount: 3, 
+    lastMessageAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+    isArchived: false,
+    autoArchiveDuration: 1440
+  },
+  { 
+    id: 't2', 
+    channelId: 'ch3', 
+    name: 'Geometric Design System', 
+    messageCount: 45, 
+    memberCount: 5, 
+    lastMessageAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
+    isArchived: true,
+    autoArchiveDuration: 1440
+  }
+];
+
+export const MOCK_MESSAGES: Message[] = [
+  {
+    id: 'm1',
+    channelId: 'ch3',
+    userId: 'u1',
+    content: 'Check out the new design system specs I just uploaded. Also, here is the updated deployment script for the staging environment:\n\n```bash\n# Deploy staging\nnpm run build\ndocker build -t nexus-app:staging .\ndocker push registry.nexus.io/app:staging\nkubectl rollout restart deployment/nexus-frontend\n```',
+    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+    attachments: [
+      { name: 'design-specs-v2.png', url: 'https://picsum.photos/seed/nexus/1200/800', type: 'image', size: '2.4 MB' },
+      { name: 'staging-logs.mp4', url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4', type: 'video', size: '15.8 MB' }
+    ]
+  },
+  {
+    id: 'm2',
+    channelId: 'ch3',
+    userId: 'u2',
+    content: 'System latency is minimal. UI response times are within target.',
+    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+  },
+  {
+    id: 'm3',
+    channelId: 'ch3',
+    userId: 'u3',
+    content: 'Agreed. CPU usage is way down compared to our old app. Check out this performance trace.',
+    timestamp: new Date(Date.now() - 1000 * 60 * 55).toISOString(),
+    attachments: [
+      { name: 'cpu-trace-01.json', url: 'https://raw.githubusercontent.com/mdn/learning-area/master/javascript/oojs/json/superheroes.json', type: 'file', size: '124 KB' }
+    ]
+  },
+  {
+    id: 'm4',
+    channelId: 'ch3',
+    userId: 'u1',
+    content: 'We still have some features to build out, like voice chat and screen sharing, but the foundation is solid.',
+    timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
+  },
+  {
+    id: 'm5',
+    channelId: 'ch3',
+    userId: 'u4',
+    content: 'When are we planning to deploy the first alpha?',
+    timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
+  },
+];

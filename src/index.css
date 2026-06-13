@@ -1,0 +1,191 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* ── Colors ── Surface ── */
+  --color-surface-0: #111214;
+  --color-surface-1: #1a1b1e;
+  --color-surface-2: #222427;
+  --color-surface-3: #2a2d31;
+  --color-surface-4: #35383e;
+
+  /* ── Border Colors ── */
+  --color-border: rgba(255, 255, 255, 0.06);
+  --color-border-hover: rgba(255, 255, 255, 0.10);
+  --color-border-active: rgba(88, 101, 242, 0.30);
+
+  /* ── Text Colors ── */
+  --color-text-primary: #f2f3f5;
+  --color-text-secondary: #b5bac1;
+  --color-text-tertiary: #949ba4;
+  --color-text-muted: #6d6f78;
+
+  /* ── Accent ── Subtle Indigo ── */
+  --color-accent: #5865F2;
+  --color-accent-hover: #4752c4;
+  --color-accent-dim: rgba(88, 101, 242, 0.08);
+  --color-accent-2: #5865F2;
+  --color-accent-2-hover: #4752c4;
+  --color-accent-2-dim: rgba(88, 101, 242, 0.06);
+
+  /* ── Status Colors ── */
+  --color-status-online: #23a55a;
+  --color-status-idle: #f0b232;
+  --color-status-dnd: #f23f43;
+  --color-status-offline: #80848e;
+
+  /* ── Semantic Colors ── */
+  --color-success: #23a55a;
+  --color-warning: #f0b232;
+  --color-danger: #f23f43;
+  --color-info: #5865F2;
+}
+
+@layer base {
+  body {
+    @apply bg-surface-1 text-text-primary antialiased font-sans m-0 p-0 overflow-hidden h-screen w-screen;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: rgba(88, 101, 242, 0.20);
+    color: #f2f3f5;
+  }
+}
+
+@layer utilities {
+  /* ── Scrollbar ── */
+  .hidden-scrollbar, .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .hidden-scrollbar::-webkit-scrollbar, .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.10);
+  }
+
+  /* ── Glass Layers ── */
+  .glass-heavy {
+    background: rgba(17, 18, 20, 0.95);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  }
+  .glass {
+    background: rgba(26, 27, 30, 0.4);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  /* ── Glow (minimal) ── */
+  .glow-accent {
+    box-shadow: none;
+  }
+  .glow-accent-strong {
+    box-shadow: none;
+  }
+  .glow-status-online {
+    box-shadow: none;
+  }
+  .glow-status-idle {
+    box-shadow: none;
+  }
+  .glow-status-dnd {
+    box-shadow: none;
+  }
+
+  /* ── Text gradient (kept but muted) ── */
+  .text-gradient {
+    color: var(--color-text-primary);
+  }
+  .text-gradient-gold {
+    color: var(--color-warning);
+  }
+
+  /* ── Border gradient ── */
+  .border-gradient {
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  /* ── Base Container Styles ── */
+  .card-base {
+    background: var(--color-surface-2);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .container-shadow {
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  /* ── Functional Utilities ── */
+  .bg-base {
+    background: var(--color-surface-1);
+  }
+  .bg-alt {
+    background: var(--color-surface-2);
+  }
+}
+
+/* ── Keyframe Animations (kept functional ones only) ── */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-3px); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+
+.animate-pulse {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.animate-vertical {
+  animation: float 3s ease-in-out infinite;
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s ease-out both;
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out both;
+}
+.animate-scale-in {
+  animation: scale-in 0.2s ease-out both;
+}

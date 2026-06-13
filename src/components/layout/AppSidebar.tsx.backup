@@ -1,0 +1,1539 @@
+import React, { useState } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { ChevronDown, ChevronRight, MessageSquare, Plus, Search, Layers, Compass, Settings, Volume2, Hash, Megaphone, Bell, Pencil, Users, Link, LogOut, Trash2, FolderPlus, ArrowRightCircle, Folder, Star, Mic, MicOff, HeadphoneOff } from 'lucide-react';
+import { DndContext, closestCorners, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent, DragOverlay, DragStartEvent, defaultDropAnimationSideEffects } from '@dnd-kit/core';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { cn } from '../../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+import { Avatar } from '../ui/Avatar';
+import { NotificationBadge } from '../ui/Badge';
+import { VoiceStatusBar } from '../voice/VoiceStatusBar';
+import { ServerSettings } from './ServerSettings';
+import { StatusPicker } from '../ui/StatusPicker';
+import { CreateChannelModal } from '../modals/CreateChannelModal';
+import { CreateFolderModal } from '../modals/CreateFolderModal';
+import { ContextMenu } from '../ui/ContextMenu';
+import { EditFolderModal } from '../modals/EditFolderModal';
+import { CreateGroupDmModal } from '../modals/CreateGroupDmModal';
+import { ChannelSettingsModal } from '../modals/ChannelSettingsModal';
+import { UserPopoverCard } from '../chat/UserPopoverCard';
+import { UserProfileModal } from '../chat/UserProfileModal';
+
+
+
+function SortableWorkspaceItem({ 
+  id, 
+  server, 
+  isActive, 
+  onClick, 
+  mentionCount, 
+  folders, 
+  moveServerToFolder,
+  onCreateCategory,
+  onCreateChannel,
+  onInvite
+}: { 
+  id: string, 
+  server: any, 
+  isActive: boolean, 
+  onClick: () => void, 
+  mentionCount: number, 
+  folders: any[], 
+  moveServerToFolder: (s: string, f: string | null) => void,
+  onCreateCategory: (serverId: string) => void,
+  onCreateChannel: (serverId: string) => void,
+  onInvite: (serverId: string) => void,
+  key?: any 
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 1,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  const isOwner = server.ownerId === 'u1';
+  const currentFolder = folders.find(f => f.serverIds.includes(server.id));
+
+  return (
+    <ContextMenu
+      items={[
+        {
+          id: 'favorite',
+          label: server.isFavorite ? 'Remove from Favorites' : 'Add to Favorites',
+          icon: <Star size={14} className={server.isFavorite ? "fill-yellow-500 text-yellow-500" : ""} />,
+          onClick: () => useAppStore.getState().updateServer(server.id, { isFavorite: !server.isFavorite })
+        },
+        ...(currentFolder ? [
+          {
+            id: 'remove-folder',
+            label: 'Remove from Folder',
+            icon: <FolderPlus size={14} className="rotate-45" />,
+            onClick: () => moveServerToFolder(server.id, null)
+          }
+        ] : []),
+        ...folders.filter(f => !currentFolder || f.id !== currentFolder.id).map(f => ({
+          id: `move-${f.id}`,
+          label: `Move to ${f.name}`,
+          icon: <div className="w-2 h-2 rounded-full" style={{ backgroundColor: f.color }} />,
+          onClick: () => moveServerToFolder(server.id, f.id)
+        })),
+        ...(isOwner ? [
+          { divider: true, id: 'd-owner-opt', label: '' },
+          {
+            id: 'create-category',
+            label: 'Create Category',
+            icon: <FolderPlus size={14} />,
+            onClick: () => onCreateCategory(server.id)
+          },
+          {
+            id: 'create-channel',
+            label: 'Create Channel',
+            icon: <Plus size={14} />,
+            onClick: () => onCreateChannel(server.id)
+          },
+          {
+            id: 'invite',
+            label: 'Invite to Server',
+            icon: <Link size={14} />,
+            onClick: () => onInvite(server.id)
+          }
+        ] : [])
+      ]}
+    >
+      <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+        <WorkspaceItem
+          name={server.name}
+          icon={
+            server.iconUrl ? (
+              <img src={server.iconUrl} alt={server.name} className="w-4 h-4 rounded-sm object-cover" />
+            ) : (
+              <div className="w-4 h-4 bg-surface-3 rounded-sm flex items-center justify-center">
+                <span className="text-[8px] font-bold text-text-secondary">{server.name.substring(0, 1)}</span>
+              </div>
+            )
+          }
+          isActive={isActive}
+          onClick={onClick}
+          mentionCount={mentionCount}
+        />
+      </div>
+    </ContextMenu>
+  );
+}
+
+function SortableCategory({ id, category, children, onToggle, onAddChannel, isCollapsed }: { id: string, category: any, children: React.ReactNode, onToggle: () => void, onAddChannel: (e: React.MouseEvent) => void, isCollapsed: boolean, key?: any }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 1,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="group/cat">
+      <ContextMenu
+        items={[
+          { id: 'rename', label: 'Rename Category', icon: <Pencil size={14} />, onClick: () => {
+            useAppStore.getState().openDialog({
+              type: 'input',
+              title: 'Rename Category',
+              description: 'Enter a new name for this category.',
+              defaultValue: category.name,
+              onConfirm: (newName) => useAppStore.getState().updateCategory(category.id, { name: newName })
+            });
+          }},
+          { id: 'delete', label: 'Delete Category', icon: <Trash2 size={14} />, danger: true, onClick: () => {
+             useAppStore.getState().openDialog({
+               type: 'confirm',
+               title: 'Delete Category',
+               description: `Are you sure you want to delete "${category.name}"? All channels within will be removed.`,
+               onConfirm: () => useAppStore.getState().deleteCategory(category.id)
+             });
+          }},
+          { divider: true, id: 'd1', label: '' },
+          { id: 'add-channel', label: 'Create Channel', icon: <Plus size={14} />, onClick: () => onAddChannel({ stopPropagation: () => {} } as any) }
+        ]}
+      >
+        <h3
+          {...attributes}
+          {...listeners}
+          onClick={onToggle}
+          className="text-[10px] uppercase font-bold tracking-widest text-text-muted px-2 py-1.5 flex items-center justify-between group cursor-pointer hover:text-text-secondary transition-colors"
+        >
+          <div className="flex items-center gap-1">
+            <ChevronDown size={10} className={cn("transition-transform duration-200", isCollapsed && "-rotate-90")} />
+            {category.name}
+          </div>
+          <button 
+            onClick={onAddChannel} 
+            className="p-0.5 rounded-md hover:bg-surface-3 hover:text-text-primary opacity-0 group-hover/cat:opacity-100 transition-all"
+          >
+            <Plus size={12} />
+          </button>
+        </h3>
+      </ContextMenu>
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden space-y-0.5"
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function SortableChannel({ id, channel, children }: { id: string, channel: any, children: React.ReactNode, key?: any }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 1,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {children}
+    </div>
+  );
+}
+
+export function AppSidebar() {
+  const { 
+    servers, 
+    activeServerId, 
+    setActiveServer, 
+    activeChannelId, 
+    setActiveChannel, 
+    channels, 
+    categories, 
+    users, 
+    activeDmId, 
+    setActiveDm, 
+    setSettingsOpen, 
+    isExploreOpen, 
+    setExploreOpen, 
+    voiceState, 
+    voiceConnections,
+    joinVoiceChannel, 
+    setNotificationsOpen, 
+    setUserStatus, 
+    setCustomStatus, 
+    folders, 
+    addFolder, 
+    deleteFolder, 
+    updateFolder,
+    moveServerToFolder,
+    reorderServers,
+    reorderCategories,
+    reorderChannels,
+    moveChannelToCategory,
+    drafts,
+    notifications,
+    isDraftsOpen,
+    setDraftsOpen,
+    dmChannels,
+    openDialog,
+    leaveGroupDm,
+    renameGroupDm
+  } = useAppStore();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveDragId(event.active.id as string);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDragId(null);
+    const { active, over } = event;
+
+    const activeId = active.id as string;
+    const isActiveServer = servers.some(s => s.id === activeId);
+
+    // 1. Server dragging
+    if (isActiveServer) {
+      const activeFolder = folders.find(f => f.serverIds.includes(activeId));
+
+      // If dropped on nothing, or not on a server: extract from folder
+      if (!over || !servers.some(s => s.id === over.id)) {
+        if (activeFolder) {
+          moveServerToFolder(activeId, null);
+        }
+        return;
+      }
+
+      const overId = over.id as string;
+      if (activeId === overId) return;
+
+      const activeServerObj = servers.find(s => s.id === activeId);
+      const overServerObj = servers.find(s => s.id === overId);
+      const overFolder = folders.find(f => f.serverIds.includes(overId));
+
+      // Case A: Dragging inside the same folder -> just reorder inside the folder
+      if (activeFolder && overFolder && activeFolder.id === overFolder.id) {
+        const folderId = activeFolder.id;
+        const currentIds = activeFolder.serverIds;
+        const activeIndex = currentIds.indexOf(activeId);
+        const overIndex = currentIds.indexOf(overId);
+        const newOrder = arrayMove(currentIds, activeIndex, overIndex);
+        updateFolder(folderId, { serverIds: newOrder });
+        return;
+      }
+
+      // Case B: Dragging from inside a folder to outside (dropping on an ungrouped server)
+      if (activeFolder && !overFolder) {
+        moveServerToFolder(activeId, null);
+        const activeIndex = servers.findIndex((s) => s.id === activeId);
+        const overIndex = servers.findIndex((s) => s.id === overId);
+        const newOrder = arrayMove(servers.map(s => s.id), activeIndex, overIndex);
+        reorderServers(newOrder);
+        return;
+      }
+
+      // Case C: Dragging from outside to inside a folder (dropping on a server in a folder)
+      if (!activeFolder && overFolder) {
+        moveServerToFolder(activeId, overFolder.id);
+        return;
+      }
+
+      // Case D: Dragging from one folder to another folder
+      if (activeFolder && overFolder && activeFolder.id !== overFolder.id) {
+        moveServerToFolder(activeId, overFolder.id);
+        return;
+      }
+
+      // Case E: Dragging two ungrouped servers -> auto-merge into folder
+      if (!activeFolder && !overFolder) {
+        if (activeServerObj && overServerObj) {
+          const folderId = `f_${Date.now()}`;
+          const folderName = `${activeServerObj.name} & ${overServerObj.name}`;
+          
+          useAppStore.setState((state) => {
+            const cleanedFolders = state.folders.map(f => ({
+              ...f,
+              serverIds: f.serverIds.filter(id => id !== activeId && id !== overId)
+            }));
+            
+            return {
+              folders: [
+                ...cleanedFolders,
+                {
+                  id: folderId,
+                  name: folderName,
+                  color: '#5865f2',
+                  serverIds: [overId, activeId]
+                }
+              ]
+            };
+          });
+        }
+        return;
+      }
+      return;
+    }
+
+    if (!over) return;
+    const overId = over.id as string;
+    if (activeId === overId) return;
+
+    const activeCategory = categories.find(c => c.id === activeId);
+    const overCategory = categories.find(c => c.id === overId);
+    
+    const activeChannel = channels.find(c => c.id === activeId);
+    const overChannel = channels.find(c => c.id === overId);
+
+    // 2. Category reordering
+    if (activeCategory && overCategory) {
+      const serverCategories = categories.filter(c => c.serverId === activeServerId).sort((a, b) => (a.order || 0) - (b.order || 0)).map(c => c.id);
+      const activeIndex = serverCategories.indexOf(activeId);
+      const overIndex = serverCategories.indexOf(overId);
+      const newOrder = arrayMove(serverCategories, activeIndex, overIndex);
+      reorderCategories(activeServerId!, newOrder);
+      return;
+    }
+
+    // 3. Channel reordering or moving between categories
+    if (activeChannel) {
+      if (overChannel) {
+        if (activeChannel.categoryId === overChannel.categoryId) {
+          // Reorder within same category
+          const catChannels = channels
+            .filter(c => c.categoryId === activeChannel.categoryId)
+            .sort((a, b) => (a.order || 0) - (b.order || 0))
+            .map(c => c.id);
+          const activeIndex = catChannels.indexOf(activeId);
+          const overIndex = catChannels.indexOf(overId);
+          const newOrder = arrayMove(catChannels, activeIndex, overIndex);
+          reorderChannels(activeChannel.categoryId!, newOrder);
+        } else {
+          // Move to different category (where the overChannel is)
+          moveChannelToCategory(activeId, overChannel.categoryId!);
+        }
+      } else if (overCategory) {
+        // Drop on a category header
+        moveChannelToCategory(activeId, overId);
+      }
+    }
+  };
+  const [isWorkspaceMenuOpen, setIsWorkspaceMenuOpen] = useState(false);
+  const [dmSearch, setDmSearch] = useState('');
+  const [isStatusPickerOpen, setIsStatusPickerOpen] = useState(false);
+  const [isCreateWorkspaceOpen, setIsCreateWorkspaceOpen] = useState(false);
+  const [isServerSettingsOpen, setIsServerSettingsOpen] = useState(false);
+  const [isCreateGroupDmOpen, setIsCreateGroupDmOpen] = useState(false);
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
+  const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [settingsChannelId, setSettingsChannelId] = useState<string | null>(null);
+  const [createChannelCategory, setCreateChannelCategory] = useState<string | null>(null);
+
+  const activeServer = servers.find(s => s.id === activeServerId);
+  const currentUser = users['u1'];
+  
+  const isOwnerOfActive = activeServer && activeServer.ownerId === 'u1';
+  const headerContextMenuItems = activeServer && isOwnerOfActive ? [
+    {
+      id: 'create-category',
+      label: 'Create Category',
+      icon: <FolderPlus size={14} />,
+      onClick: () => handleCreateCategory(activeServer.id)
+    },
+    {
+      id: 'create-channel',
+      label: 'Create Channel',
+      icon: <Plus size={14} />,
+      onClick: () => handleCreateChannel(activeServer.id)
+    },
+    {
+      id: 'invite',
+      label: 'Invite to Server',
+      icon: <Link size={14} />,
+      onClick: () => handleCreateInvite(activeServer.id)
+    },
+    { divider: true, id: 'd-header-opt', label: '' },
+    {
+      id: 'settings',
+      label: 'Server Settings',
+      icon: <Settings size={14} />,
+      onClick: () => setIsServerSettingsOpen(true)
+    }
+  ] : [];
+
+  const handleWorkspaceSelect = (id: string | null) => {
+    setActiveServer(id);
+    setIsWorkspaceMenuOpen(false);
+  };
+
+  const handleCreateCategory = (serverId: string) => {
+    setActiveServer(serverId);
+    openDialog({
+      type: 'input',
+      title: 'New Category',
+      description: 'Group your channels into categories.',
+      placeholder: 'Category Name',
+      onConfirm: (name) => {
+        if (name) {
+          useAppStore.getState().addCategory(serverId, name);
+        }
+      }
+    });
+  };
+
+  const handleCreateChannel = (serverId: string) => {
+    setActiveServer(serverId);
+    const serverCats = useAppStore.getState().categories.filter(c => c.serverId === serverId);
+    if (serverCats.length > 0) {
+      setCreateChannelCategory(serverCats[0].id);
+    } else {
+      const tempCatId = `cat_${Date.now()}`;
+      useAppStore.getState().addCategory(serverId, 'General');
+      setCreateChannelCategory(tempCatId);
+    }
+  };
+
+  const handleCreateInvite = (serverId: string) => {
+    const code = useAppStore.getState().createInvite(serverId, {});
+    openDialog({
+      type: 'confirm',
+      title: 'Invite Created',
+      description: `Invite code: ${code}. You can share this code with friends.`,
+      confirmLabel: 'Copy Code',
+      onConfirm: () => {
+        navigator.clipboard.writeText(code);
+      }
+    });
+  };
+
+  const openCreateWorkspace = () => {
+    setIsWorkspaceMenuOpen(false);
+    setIsCreateWorkspaceOpen(true);
+  };
+
+  const toggleCategory = (categoryId: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
+    });
+  };
+
+  const handleAddChannel = (categoryId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCreateChannelCategory(categoryId);
+  };
+
+  const handleCreateServer = (template?: 'gaming' | 'school') => {
+    const names = ['My Workspace', 'New Community', 'Team Space'];
+    let name = names[Math.floor(Math.random() * names.length)];
+    if (template === 'gaming') name = "Gaming Hub " + Math.floor(Math.random() * 100);
+    if (template === 'school') name = "Study Group " + Math.floor(Math.random() * 100);
+    useAppStore.getState().addServer(name, template);
+    setIsCreateWorkspaceOpen(false);
+  };
+
+  const getChannelIcon = (type: string) => {
+    switch (type) {
+      case 'voice': return Volume2;
+      case 'announcement': return Megaphone;
+      case 'stage': return Mic;
+      default: return Hash;
+    }
+  };
+
+  return (
+    <DndContext 
+      sensors={sensors} 
+      collisionDetection={closestCorners} 
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+    >
+        <div className="w-[272px] shrink-0 h-full flex flex-col bg-surface-1 border-r border-border">
+        {/* Workspace Selector */}
+        <div className="relative px-3 py-4 shrink-0 z-50">
+          <ContextMenu items={headerContextMenuItems}>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setIsWorkspaceMenuOpen(!isWorkspaceMenuOpen)}
+              className="w-full flex items-center justify-between bg-surface-2 rounded-md px-3 py-2.5 transition-all text-left group hover:bg-surface-3 cursor-pointer"
+            >
+              <div className="flex items-center gap-3 overflow-hidden">
+                {isExploreOpen ? (
+                <div className="w-7 h-7 rounded-lg bg-surface-3 flex items-center justify-center shrink-0 border border-border">
+                    <Compass size={14} className="text-text-secondary" />
+                  </div>
+                ) : activeServer ? (
+                  activeServer.iconUrl ? (
+                    <img src={activeServer.iconUrl} alt={activeServer.name} className="w-7 h-7 rounded-lg object-cover shrink-0 border border-border" />
+                  ) : (
+                    <div className="w-7 h-7 rounded-lg bg-surface-3 flex items-center justify-center shrink-0 border border-border">
+                      <span className="text-xs font-bold text-text-secondary">{activeServer.name.substring(0, 1)}</span>
+                    </div>
+                  )
+                ) : (
+                  <div className="w-7 h-7 rounded-lg bg-surface-3 flex items-center justify-center shrink-0 border border-border">
+                    <MessageSquare size={13} className="text-text-secondary" />
+                  </div>
+                )}
+                <span className="font-semibold text-sm text-text-primary truncate">
+                  {isExploreOpen ? "Explore Spaces" : activeServer ? activeServer.name : "Direct Messages"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                {activeServerId && (
+                  <button onClick={(e) => { e.stopPropagation(); setIsServerSettingsOpen(true); }} className="p-1 rounded-md text-text-muted hover:text-text-secondary hover:bg-surface-3/50 transition-colors opacity-0 group-hover:opacity-100">
+                    <Settings size={14} />
+                  </button>
+                )}
+                <ChevronDown size={16} className={cn("text-text-muted shrink-0 transition-transform duration-200", isWorkspaceMenuOpen && "rotate-180")} />
+              </div>
+            </div>
+          </ContextMenu>
+
+          {/* Dropdown */}
+          <AnimatePresence>
+            {isWorkspaceMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-100 bg-black/40" onClick={() => setIsWorkspaceMenuOpen(false)} />
+                <motion.div
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.15, ease: "easeOut" }}
+                  className="absolute top-[76px] left-3 w-[calc(100%-24px)] bg-surface-2 rounded shadow-2xl z-110 overflow-hidden border border-border"
+                >
+                  <div className="p-1.5 space-y-0.5">
+                    <WorkspaceItem
+                      name="Direct Messages"
+                      icon={<MessageSquare size={14} />}
+                      isActive={activeServerId === null && !isExploreOpen && !isDraftsOpen}
+                      onClick={() => {
+                        handleWorkspaceSelect(null);
+                        setDraftsOpen(false);
+                      }}
+                    />
+                    <div className="h-px bg-border my-1 mx-2" />
+                    
+                    <SortableContext items={servers.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                        <div className="max-h-[300px] overflow-y-auto hidden-scrollbar space-y-0.5">
+                          {/* Favorites Section */}
+                          {servers.some(s => s.isFavorite && s.members.includes('u1')) && (
+                            <>
+                              <div className="px-2.5 py-1.5 text-[9px] uppercase font-black tracking-widest text-text-muted flex items-center gap-1.5">
+                                <Star size={8} className="fill-yellow-500 text-yellow-500" />
+                                <span>Favorites</span>
+                              </div>
+                              {servers.filter(s => s.isFavorite && s.members.includes('u1')).map(server => (
+                                <SortableWorkspaceItem
+                                  key={`fav-${server.id}`}
+                                  id={server.id}
+                                  server={server}
+                                  isActive={activeServerId === server.id}
+                                  onClick={() => handleWorkspaceSelect(server.id)}
+                                  mentionCount={notifications.filter(n => n.serverId === server.id && !n.read && n.type === 'mention').length}
+                                  folders={folders}
+                                  moveServerToFolder={moveServerToFolder}
+                                  onCreateCategory={handleCreateCategory}
+                                  onCreateChannel={handleCreateChannel}
+                                  onInvite={handleCreateInvite}
+                                />
+                              ))}
+                              <div className="h-px bg-border my-1 mx-2" />
+                            </>
+                          )}
+
+                          <div className="px-2.5 py-1.5 text-[9px] uppercase font-black tracking-widest text-text-muted">Spaces</div>
+                          
+                          {/* Folders */}
+                          {folders.map(folder => {
+                            const folderServers = servers.filter(s => folder.serverIds.includes(s.id) && s.members.includes('u1'));
+                            const isCollapsed = collapsedFolders.has(folder.id);
+                            return (
+                              <div 
+                                key={folder.id} 
+                                className="space-y-0.5"
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.currentTarget.classList.add('bg-accent/10');
+                                }}
+                                onDragLeave={(e) => {
+                                  e.currentTarget.classList.remove('bg-accent/10');
+                                }}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  e.currentTarget.classList.remove('bg-accent/10');
+                                  const serverId = e.dataTransfer.getData('serverId');
+                                  if (serverId) moveServerToFolder(serverId, folder.id);
+                                }}
+                              >
+                                <ContextMenu
+                                  items={[
+                                    { id: 'edit', label: 'Edit Folder', icon: <Settings size={14} />, onClick: () => setEditingFolderId(folder.id) },
+                                    { id: 'delete', label: 'Delete Folder', icon: <Trash2 size={14} />, danger: true, onClick: () => deleteFolder(folder.id) }
+                                  ]}
+                                >
+                                  <button 
+                                    onClick={() => {
+                                      setCollapsedFolders(prev => {
+                                        const next = new Set(prev);
+                                        if (next.has(folder.id)) next.delete(folder.id);
+                                        else next.add(folder.id);
+                                        return next;
+                                      });
+                                    }}
+                                    className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-[11px] font-bold text-text-tertiary hover:bg-surface-3 hover:text-text-secondary transition-all group"
+                                  >
+                                    <ChevronDown size={12} className={cn("transition-transform duration-300", isCollapsed && "-rotate-90")} />
+                                    {isCollapsed && folderServers.length > 0 ? (
+                                      <div className="flex -space-x-1.5 items-center mr-1 shrink-0">
+                                        {folderServers.slice(0, 3).map(s => (
+                                          <div 
+                                            key={s.id} 
+                                            className="w-4 h-4 rounded-full border border-surface-2 bg-surface-3 flex items-center justify-center overflow-hidden shrink-0 shadow-sm"
+                                            title={s.name}
+                                          >
+                                            {s.iconUrl ? (
+                                              <img src={s.iconUrl} alt="" className="w-full h-full object-cover" />
+                                            ) : (
+                                              <span className="text-[7px] font-bold text-text-secondary">{s.name[0]}</span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <Folder 
+                                        size={12} 
+                                        style={{ color: folder.color, fill: `${folder.color}33` }} 
+                                        className="shrink-0"
+                                      />
+                                    )}
+                                    <span className="truncate flex-1 text-left uppercase tracking-widest">{folder.name || 'Folder'}</span>
+                                  </button>
+                                </ContextMenu>
+                                {!isCollapsed && folderServers.map(server => (
+                                  <div key={server.id} className="pl-3">
+                                    <SortableWorkspaceItem
+                                      id={server.id}
+                                      server={server}
+                                      isActive={activeServerId === server.id}
+                                      onClick={() => handleWorkspaceSelect(server.id)}
+                                      mentionCount={notifications.filter(n => n.serverId === server.id && !n.read && n.type === 'mention').length}
+                                      folders={folders}
+                                      moveServerToFolder={moveServerToFolder}
+                                      onCreateCategory={handleCreateCategory}
+                                      onCreateChannel={handleCreateChannel}
+                                      onInvite={handleCreateInvite}
+                                    />
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+
+                          {/* Ungrouped Servers */}
+                          <div className="space-y-0.5">
+                            {servers.filter(s => s.members.includes('u1') && !folders.some(f => f.serverIds.includes(s.id))).map(server => (
+                              <SortableWorkspaceItem
+                                key={server.id}
+                                id={server.id}
+                                server={server}
+                                isActive={activeServerId === server.id}
+                                onClick={() => handleWorkspaceSelect(server.id)}
+                                mentionCount={notifications.filter(n => n.serverId === server.id && !n.read && n.type === 'mention').length}
+                                folders={folders}
+                                moveServerToFolder={moveServerToFolder}
+                                onCreateCategory={handleCreateCategory}
+                                onCreateChannel={handleCreateChannel}
+                                onInvite={handleCreateInvite}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </SortableContext>
+                    <div className="h-px bg-border my-1 mx-2" />
+                    <button onClick={() => { setIsCreateFolderOpen(true); setIsWorkspaceMenuOpen(false); }} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium text-text-tertiary hover:text-text-primary hover:bg-surface-3/50 transition-colors text-left">
+                      <FolderPlus size={14} />
+                      <span>Create Folder</span>
+                    </button>
+                    <div className="h-px bg-border my-1 mx-2" />
+                    <button onClick={openCreateWorkspace} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium text-text-tertiary hover:text-text-primary hover:bg-surface-3/50 transition-colors text-left">
+                      <Plus size={14} />
+                      <span>Create Space</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setIsWorkspaceMenuOpen(false);
+                        openDialog({
+                          type: 'input',
+                          title: 'Join Space',
+                          description: 'Enter an invite code to join a community.',
+                          placeholder: 'EX: NEXUS123',
+                          onConfirm: (code) => {
+                             const success = useAppStore.getState().joinServerWithInvite(code || '');
+                             if (!success) {
+                               alert('Invalid or expired invite code.');
+                             }
+                          }
+                        });
+                      }} 
+                      className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium text-text-tertiary hover:text-text-primary hover:bg-surface-3/50 transition-colors text-left"
+                    >
+                      <Link size={14} />
+                      <span>Join Space</span>
+                    </button>
+                    <div className="h-px bg-border my-1 mx-2" />
+                    <WorkspaceItem
+                      name="Explore"
+                      icon={<Compass size={14} />}
+                      isActive={isExploreOpen}
+                      onClick={() => { setExploreOpen(true); setIsWorkspaceMenuOpen(false); }}
+                    />
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Navigation List */}
+        <div className="flex-1 overflow-y-auto hidden-scrollbar px-3 pb-4">
+          {isExploreOpen ? (
+            <div className="space-y-2 mt-4 text-center py-8">
+              <div className="w-12 h-12 mx-auto rounded-2xl bg-surface-3 flex items-center justify-center mb-4">
+                <Compass size={24} className="text-text-secondary" />
+              </div>
+              <h3 className="text-sm font-bold text-text-primary">Explore Spaces</h3>
+              <p className="text-xs text-text-muted">Discover new communities to join.</p>
+            </div>
+          ) : !activeServerId ? (
+            <div className="space-y-1">
+              <div className="space-y-0.5 mb-4">
+                <button 
+                  onClick={() => {
+                    setActiveDm(null);
+                    setDraftsOpen(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-bold transition-all",
+                    !isDraftsOpen && !activeDmId ? "bg-surface-3 text-text-primary shadow-sm" : "text-text-muted hover:bg-surface-2 hover:text-text-secondary"
+                  )}
+                >
+                  <Users size={16} />
+                  <span>Friends</span>
+                </button>
+                <button 
+                  onClick={() => setDraftsOpen(true)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-bold transition-all",
+                    isDraftsOpen ? "bg-surface-3 text-text-primary shadow-sm" : "text-text-muted hover:bg-surface-2 hover:text-text-secondary"
+                  )}
+                >
+                  <Pencil size={16} />
+                  <span>Drafts & Pending</span>
+                </button>
+              </div>
+
+              <div className="relative mb-3">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search conversations..."
+                  value={dmSearch}
+                  onChange={(e) => setDmSearch(e.target.value)}
+                  className="w-full bg-surface-2 border border-border rounded-xl py-1.5 pl-8 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/30 transition-colors"
+                />
+              </div>
+              <div className="flex items-center justify-between px-2 mb-2 group">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted hover:text-text-secondary transition-colors cursor-pointer">Direct Messages</span>
+                <button 
+                  onClick={() => setIsCreateGroupDmOpen(true)}
+                  className="w-4 h-4 rounded text-text-muted hover:text-text-primary hover:bg-surface-3 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                  title="Create DM"
+                >
+                  <Plus size={12} />
+                </button>
+              </div>
+
+              <div className="space-y-0.5">
+                {Object.values(dmChannels)
+                  .filter(dm => {
+                    if (!dmSearch) return true;
+                    if (dm.name && dm.name.toLowerCase().includes(dmSearch.toLowerCase())) return true;
+                    // Check participant names
+                    const participants = dm.participants.map(pid => users[pid]?.username).join(', ');
+                    return participants.toLowerCase().includes(dmSearch.toLowerCase());
+                  })
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map(dm => {
+                    // Generate display name and avatar
+                    const otherParticipants = dm.participants.filter(id => id !== currentUser.id);
+                    let displayName = dm.name;
+                    let avatarSrc = undefined;
+                    
+                    if (!displayName) {
+                      if (otherParticipants.length === 1) {
+                        const u = users[otherParticipants[0]];
+                        displayName = u?.username || 'Unknown User';
+                        avatarSrc = u?.avatarUrl;
+                      } else {
+                        displayName = otherParticipants.map(id => users[id]?.username).join(', ') || 'Unnamed Group';
+                      }
+                    }
+
+                    return (
+                      <ContextMenu
+                        key={dm.id}
+                        items={[
+                          { 
+                            id: 'rename', 
+                            label: 'Change Name', 
+                            icon: <Pencil size={14} />, 
+                            onClick: () => {
+                              openDialog({
+                                type: 'input',
+                                title: 'Rename Group',
+                                description: 'Give this group a new name.',
+                                defaultValue: dm.name || '',
+                                onConfirm: (name) => renameGroupDm(dm.id, name)
+                              });
+                            }
+                          },
+                          { divider: true, id: 'd1', label: '' },
+                          { 
+                            id: 'leave', 
+                            label: 'Leave Group', 
+                            icon: <LogOut size={14} />, 
+                            danger: true, 
+                            onClick: () => {
+                              openDialog({
+                                type: 'confirm',
+                                title: 'Leave Group',
+                                description: 'Are you sure you want to leave this group? You will need an invite to rejoin.',
+                                confirmLabel: 'Leave Group',
+                                isDanger: true,
+                                onConfirm: () => {
+                                  leaveGroupDm(dm.id);
+                                  if (activeDmId === dm.id) setActiveDm(null);
+                                }
+                              });
+                            }
+                          }
+                        ]}
+                      >
+                        <button
+                          onClick={() => setActiveDm(dm.id)}
+                          className={cn(
+                            "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all group",
+                            activeDmId === dm.id ? "bg-surface-3/80 text-text-primary shadow-sm" : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
+                          )}
+                        >
+                          {avatarSrc ? (
+                            <Avatar src={avatarSrc} alt={displayName} size="sm" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-surface-3 flex items-center justify-center border border-border/50 shrink-0">
+                              <Users size={14} className="text-text-muted group-hover:text-text-secondary" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 text-left">
+                            <p className="text-[13px] font-semibold truncate leading-tight">{displayName}</p>
+                            {otherParticipants.length > 1 ? (
+                              <p className="text-[11px] text-text-muted truncate">{otherParticipants.length + 1} Members</p>
+                            ) : (
+                              <p className="text-[11px] text-text-muted truncate capitalize">{users[otherParticipants[0]]?.customStatus || users[otherParticipants[0]]?.status || ''}</p>
+                            )}
+                          </div>
+                        </button>
+                      </ContextMenu>
+                    );
+                  })}
+                  
+                {/* Fallback for legacy DMs or starting new ones directly from the list */}
+                {Object.values(users)
+                  .filter(u => u.id !== 'u1' && (
+                    (activeDmId === u.id && !Object.values(dmChannels).some(dm => dm.participants.length === 2 && dm.participants.includes(u.id))) ||
+                    (dmSearch && u.username.toLowerCase().includes(dmSearch.toLowerCase()) && !Object.values(dmChannels).some(dm => dm.participants.length === 2 && dm.participants.includes(u.id)))
+                  ))
+                  .map(user => (
+                    <UserItem
+                      key={user.id}
+                      user={user}
+                      isActive={activeDmId === user.id}
+                      onClick={() => {
+                        setActiveDm(user.id);
+                      }}
+                    />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <ContextMenu items={headerContextMenuItems} className="min-h-full w-full">
+              <div className="space-y-4 mt-2">
+                  <SortableContext items={categories.filter(c => c.serverId === activeServerId).map(c => c.id)} strategy={verticalListSortingStrategy}>
+                    {categories.filter(c => c.serverId === activeServerId).sort((a, b) => a.order - b.order).map(category => {
+                      const categoryChannels = channels.filter(ch => ch.categoryId === category.id && ch.serverId === activeServerId).sort((a, b) => (a.order || 0) - (b.order || 0));
+                      const isCollapsed = collapsedCategories.has(category.id);
+
+                      return (
+                        <SortableCategory
+                          key={category.id}
+                          id={category.id}
+                          category={category}
+                          isCollapsed={isCollapsed}
+                          onToggle={() => toggleCategory(category.id)}
+                          onAddChannel={(e) => handleAddChannel(category.id, e)}
+                        >
+                          <SortableContext items={categoryChannels.map(c => c.id)} strategy={verticalListSortingStrategy}>
+                            {categoryChannels.map(channel => {
+                              const Icon = getChannelIcon(channel.type);
+                              const isVoice = channel.type === 'voice';
+                              const isVoiceConnected = voiceState.channelId === channel.id;
+                              
+                              const voiceConns = voiceConnections || {};
+                              const channelUsers = Object.values(voiceConns).filter((vc: any) => vc.channelId === channel.id);
+                              const voiceUserCount = channelUsers.length;
+
+                              return (
+                                <SortableChannel key={channel.id} id={channel.id} channel={channel}>
+                                  <ContextMenu
+                                    items={[
+                                      { id: 'settings', label: 'Channel Settings', icon: <Settings size={14} />, onClick: () => {
+                                        setSettingsChannelId(channel.id);
+                                      }},
+                                      { id: 'rename', label: 'Rename Channel', icon: <Pencil size={14} />, onClick: () => {
+                                        useAppStore.getState().openDialog({
+                                          type: 'input',
+                                          title: 'Rename Channel',
+                                          description: 'Enter a new name for this channel.',
+                                          defaultValue: channel.name,
+                                          onConfirm: (newName) => useAppStore.getState().updateChannel(channel.id, { name: newName })
+                                        });
+                                      }},
+                                      { divider: true, id: 'd1', label: '' },
+                                      { id: 'delete', label: 'Delete Channel', icon: <Trash2 size={14} />, danger: true, onClick: () => {
+                                        useAppStore.getState().openDialog({
+                                          type: 'confirm',
+                                          title: 'Delete Channel',
+                                          description: `Are you sure you want to delete #${channel.name}?`,
+                                          onConfirm: () => useAppStore.getState().deleteChannel(channel.id)
+                                        });
+                                      }}
+                                    ]}
+                                  >
+                                    <div key={channel.id}>
+                                      <ChannelItem
+                                        channel={channel}
+                                        icon={<Icon size={14} />}
+                                        isActive={isVoice ? isVoiceConnected : activeChannelId === channel.id}
+                                        hasDraft={!!drafts[channel.id]}
+                                        onClick={() => {
+                                          setActiveChannel(channel.id);
+                                          if (isVoice && !isVoiceConnected) {
+                                            joinVoiceChannel(channel.id);
+                                          }
+                                        }}
+                                        mentionCount={notifications.filter(n => n.channelId === channel.id && !n.read && n.type === 'mention').length}
+                                      />
+                                      {isVoice && voiceUserCount > 0 && (
+                                        <div className="ml-7 space-y-0.5 py-1">
+                                          {channelUsers.map((vc: any) => {
+                                            const u = users[vc.userId];
+                                            if (!u) return null;
+                                            return (
+                                              <UserPopoverCard key={vc.userId} userId={vc.userId} className="w-full block">
+                                                <VoiceUserItem user={u} voiceConnection={vc} />
+                                              </UserPopoverCard>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </ContextMenu>
+                                </SortableChannel>
+                              );
+                            })}
+                          </SortableContext>
+                        </SortableCategory>
+                      )
+                    })}
+                  </SortableContext>
+              </div>
+            </ContextMenu>
+          )}
+        </div>
+
+        <div className="p-3 shrink-0 mt-auto relative">
+          <motion.div layout className="bg-surface-2 border border-border/50 rounded-lg flex flex-col shadow-lg relative overflow-hidden">
+            {/* Voice Status Bar */}
+            <VoiceStatusBar />
+
+            {/* User Profile Bar */}
+            <motion.div layout className="p-2 flex items-center gap-2 relative bg-surface-2 z-10 rounded-b-lg">
+            <button 
+              onClick={(e) => { e.stopPropagation(); setIsStatusPickerOpen(!isStatusPickerOpen); }} 
+              className="shrink-0 relative group"
+            >
+              <Avatar
+                src={users['u1']?.avatarUrl || currentUser.avatarUrl}
+                alt={users['u1']?.username || currentUser.username}
+                size="md"
+                status={users['u1']?.status || currentUser.status}
+              />
+            </button>
+            <div 
+              onClick={(e) => { e.stopPropagation(); setIsStatusPickerOpen(!isStatusPickerOpen); }}
+              className="flex-1 min-w-0 py-0.5 px-2 -ml-1 hover:bg-surface-3/50 rounded-lg cursor-pointer transition-colors group"
+            >
+              <div className="text-[13px] font-bold text-text-primary truncate">{users['u1']?.username || currentUser.username}</div>
+              <div className="text-[11px] text-text-muted font-medium truncate group-hover:text-text-secondary transition-colors">{users['u1']?.customStatus || "Set Status"}</div>
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => setNotificationsOpen(true)}
+                className="text-text-muted hover:text-text-primary w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-3 transition-colors relative"
+              >
+                <Bell size={16} />
+                {useAppStore.getState().notifications.filter(n => !n.read).length > 0 && (
+                  <div className="absolute top-1.5 right-1.5 w-2 h-2 bg-danger rounded-full ring-[2.5px] ring-surface-2" />
+                )}
+              </button>
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="text-text-muted hover:text-text-primary w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-3 transition-colors"
+              >
+                <Settings size={16} />
+              </button>
+            </div>
+            </motion.div>
+          </motion.div>
+
+          <StatusPicker
+            isOpen={isStatusPickerOpen}
+            onClose={() => setIsStatusPickerOpen(false)}
+            currentStatus={users['u1']?.status || 'online'}
+            currentCustom={users['u1']?.customStatus}
+            onStatusChange={setUserStatus}
+            onCustomStatusChange={setCustomStatus}
+          />
+        </div>
+      </div>
+
+      {/* Create Workspace Modal */}
+      <AnimatePresence>
+        {isCreateWorkspaceOpen && (
+          <div className="fixed inset-0 z-10000 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsCreateWorkspaceOpen(false)}
+              className="absolute inset-0 bg-surface-0/80 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="relative w-full max-w-md bg-surface-1 rounded-lg shadow-2xl p-6 border border-border"
+            >
+              <h2 className="text-xl font-bold text-text-primary mb-2 text-center">New Workspace</h2>
+              <p className="text-text-tertiary text-xs text-center mb-6 px-4">
+                Configure a new technical environment for your organization.
+              </p>
+
+              <div className="space-y-3">
+                <button onClick={() => handleCreateServer()} className="w-full h-14 border border-border hover:border-accent/40 bg-surface-2 rounded flex items-center px-4 gap-4 transition-all group">
+                  <div className="w-8 h-8 rounded bg-surface-3 flex items-center justify-center text-text-secondary transition-all">
+                    <Compass size={18} />
+                  </div>
+                  <span className="font-bold text-text-secondary group-hover:text-text-primary transition-colors text-[13px] uppercase tracking-wider">Start Fresh</span>
+                  <ArrowRightCircle size={16} className="ml-auto text-text-muted group-hover:text-accent transition-colors" />
+                </button>
+
+                <div className="pt-2">
+                  <h3 className="text-[11px] font-bold uppercase tracking-widest text-text-muted mb-2.5">Templates</h3>
+                  <div className="space-y-2">
+                    <button onClick={() => handleCreateServer('gaming')} className="w-full h-12 border border-border hover:border-accent/40 bg-surface-2 rounded flex items-center px-4 gap-4 transition-all group">
+                      <div className="w-6 h-6 rounded bg-surface-3 flex items-center justify-center text-text-secondary">
+                        <Layers size={14} />
+                      </div>
+                      <span className="font-bold text-text-tertiary group-hover:text-text-primary transition-colors text-[12px] uppercase tracking-widest">Gaming Hub</span>
+                    </button>
+                    <button onClick={() => handleCreateServer('school')} className="w-full h-12 border border-border hover:border-accent/40 bg-surface-2 rounded flex items-center px-4 gap-4 transition-all group">
+                      <div className="w-6 h-6 rounded bg-surface-3 flex items-center justify-center text-text-secondary">
+                        <MessageSquare size={14} />
+                      </div>
+                      <span className="font-bold text-text-tertiary group-hover:text-text-primary transition-colors text-[12px] uppercase tracking-widest">School Hub</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Server Settings */}
+      <ServerSettings isOpen={isServerSettingsOpen} onClose={() => setIsServerSettingsOpen(false)} serverId={activeServerId || ''} />
+
+      {/* Create Channel Modal */}
+      {createChannelCategory && <CreateChannelModal isOpen={true} onClose={() => setCreateChannelCategory(null)} categoryId={createChannelCategory} />}
+
+      {/* Create Folder Modal */}
+      <CreateFolderModal isOpen={isCreateFolderOpen} onClose={() => setIsCreateFolderOpen(false)} />
+      
+      {/* Create Group DM Modal */}
+      <CreateGroupDmModal isOpen={isCreateGroupDmOpen} onClose={() => setIsCreateGroupDmOpen(false)} />
+
+      {/* Edit Folder Modal */}
+      {editingFolderId && <EditFolderModal isOpen={true} onClose={() => setEditingFolderId(null)} folderId={editingFolderId} />}
+
+      {/* Channel Settings Modal */}
+      {settingsChannelId && <ChannelSettingsModal isOpen={true} onClose={() => setSettingsChannelId(null)} channelId={settingsChannelId} />}
+
+      <DragOverlay dropAnimation={{
+        sideEffects: defaultDropAnimationSideEffects({
+          styles: {
+            active: {
+              opacity: '0.5',
+            },
+          },
+        }),
+      }}>
+        {activeDragId ? (() => {
+          const server = servers.find(s => s.id === activeDragId);
+          if (server) return (
+            <div className="opacity-90 scale-105 shadow-[0_20px_50px_rgba(0,0,0,0.5)] bg-surface-2 rounded-lg border border-white/10 w-[248px]">
+              <WorkspaceItem name={server.name} icon={server.iconUrl ? <img src={server.iconUrl} className="w-4 h-4 rounded-sm" /> : <div className="w-4 h-4 bg-surface-3 rounded-sm flex items-center justify-center"><span className="text-[8px]">{server.name[0]}</span></div>} isActive={false} />
+            </div>
+          );
+          
+          const category = categories.find(c => c.id === activeDragId);
+          if (category) return (
+            <div className="opacity-90 scale-105 shadow-[0_20px_50px_rgba(0,0,0,0.5)] bg-surface-2 px-3 py-1.5 rounded-md border border-white/10 w-[248px] text-[10px] uppercase font-bold tracking-widest text-text-primary flex items-center gap-1">
+              <ChevronDown size={10} />
+              {category.name}
+            </div>
+          );
+          
+          const channel = channels.find(c => c.id === activeDragId);
+          if (channel) {
+            const Icon = getChannelIcon(channel.type);
+            return (
+              <div className="opacity-90 scale-105 shadow-[0_20px_50px_rgba(0,0,0,0.5)] bg-surface-2 rounded border border-white/10 w-[248px]">
+                <ChannelItem channel={channel} icon={<Icon size={14} />} isActive={false} onClick={() => {}} />
+              </div>
+            );
+          }
+          
+          return null;
+        })() : null}
+      </DragOverlay>
+    </DndContext>
+  );
+}
+
+const WorkspaceItem: React.FC<{ 
+  name: string, 
+  icon: React.ReactNode, 
+  isActive: boolean, 
+  onClick: () => void,
+  mentionCount?: number,
+  draggable?: boolean,
+  onDragStart?: (e: React.DragEvent) => void
+}> = ({ name, icon, isActive, onClick, mentionCount, draggable, onDragStart }) => {
+  return (
+    <button
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onClick={onClick}
+      className={cn(
+        "relative w-full flex items-center gap-2.5 px-2.5 py-2 rounded text-sm font-medium transition-all text-left outline-none ring-0 focus:ring-0 focus:outline-none",
+        isActive ? "text-text-primary" : "text-text-secondary hover:bg-surface-3 hover:text-text-primary"
+      )}
+    >
+      <div className={cn("flex items-center justify-center relative z-10", isActive ? "text-text-primary" : "text-text-muted")}>
+        {icon}
+      </div>
+      <span className="truncate relative z-10 flex-1">{name}</span>
+      {mentionCount !== undefined && mentionCount > 0 && !isActive && (
+        <span className="relative z-10 min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-danger text-white text-[10px] font-bold px-1 animate-pulse-subtle">
+          {mentionCount}
+        </span>
+      )}
+      {isActive && (
+        <motion.div 
+          layoutId="activeWorkspaceIndicator"
+          className="absolute inset-0 bg-surface-3 rounded-lg border border-white/5 z-0" 
+          transition={{ type: "spring", stiffness: 300, damping: 30 }}
+        />
+      )}
+    </button>
+  );
+};
+
+const UserItem: React.FC<{ user: any, isActive?: boolean, onClick?: () => void }> = ({ user, isActive, onClick }) => {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-3 px-2 py-2 rounded transition-all group text-left outline-none border border-transparent ring-0 focus:ring-0 focus:outline-none",
+        isActive ? "bg-surface-2 border-border shadow-sm" : "hover:bg-surface-2"
+      )}
+    >
+      <Avatar
+        src={user.avatarUrl}
+        alt={user.username}
+        size="sm"
+        status={user.status}
+        showStatus={true}
+      />
+      <div className="flex-1 min-w-0">
+        <div className={cn(
+          "text-sm font-medium truncate transition-colors",
+          isActive ? "text-text-primary" : "text-text-secondary group-hover:text-text-primary"
+        )}>{user.username}</div>
+      </div>
+    </button>
+  );
+};
+
+const VoiceUserItem: React.FC<{ user: any, voiceConnection?: any }> = ({ user, voiceConnection }) => {
+  const { voiceState, toggleMute, toggleDeafen, setSettingsOpen, servers, activeServerId } = useAppStore();
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const isSpeaking = voiceConnection?.isSpeaking && !voiceConnection?.isMuted;
+  const isMuted = voiceConnection?.isMuted;
+  const isDeafened = voiceConnection?.isDeafened;
+  const isMe = user.id === 'u1';
+  const isConnecting = isMe && voiceState?.isConnecting;
+
+  const activeServer = servers.find(s => s.id === activeServerId);
+  const isServerOwner = activeServer?.ownerId === 'u1';
+
+  // Build Context Menu Items
+  const contextMenuItems = isMe ? [
+    {
+      id: 'profile',
+      label: 'Profile',
+      onClick: () => setIsProfileOpen(true)
+    },
+    {
+      id: 'mention',
+      label: 'Mention',
+      onClick: () => {}
+    },
+    { divider: true, id: 'd1', label: '' },
+    {
+      id: 'mute',
+      label: 'Mute',
+      checked: !!voiceState.isMuted,
+      onClick: () => toggleMute()
+    },
+    {
+      id: 'deafen',
+      label: 'Deafen',
+      checked: !!voiceState.isDeafened,
+      onClick: () => toggleDeafen()
+    },
+    {
+      id: 'edit-profile',
+      label: 'Edit Per-server Profile',
+      onClick: () => setSettingsOpen(true)
+    },
+    {
+      id: 'apps',
+      label: 'Apps',
+      rightIcon: <ChevronRight size={14} />
+    },
+    {
+      id: 'roles',
+      label: 'Roles',
+      rightIcon: <ChevronRight size={14} />
+    },
+    { divider: true, id: 'd2', label: '' },
+    {
+      id: 'copy-id',
+      label: 'Copy User ID',
+      rightIcon: <span className="text-[10px] font-bold bg-[#383a40] text-[#dbdee1] px-1 py-0.5 rounded">ID</span>,
+      onClick: () => navigator.clipboard.writeText(user.id)
+    }
+  ] : [
+    {
+      id: 'profile',
+      label: 'Profile',
+      onClick: () => setIsProfileOpen(true)
+    },
+    {
+      id: 'mention',
+      label: 'Mention',
+      onClick: () => {
+        window.dispatchEvent(new CustomEvent('nexus:insert-mention', { detail: user.username }));
+      }
+    },
+    { divider: true, id: 'd1', label: '' },
+    {
+      id: 'mute',
+      label: 'Mute',
+      checked: !!voiceConnection?.isMuted,
+      onClick: async () => {
+        const newMuted = !voiceConnection?.isMuted;
+        useAppStore.setState((state) => {
+          const newConns = { ...state.voiceConnections };
+          if (newConns[user.id]) {
+            newConns[user.id] = { ...newConns[user.id], isMuted: newMuted };
+          }
+          return { voiceConnections: newConns };
+        });
+        try {
+          await fetch('/api/voice/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, isMuted: newMuted })
+          });
+        } catch (e) {
+          console.error('Failed to sync mute state:', e);
+        }
+      }
+    },
+    {
+      id: 'deafen',
+      label: 'Deafen',
+      checked: !!voiceConnection?.isDeafened,
+      onClick: async () => {
+        const newDeafened = !voiceConnection?.isDeafened;
+        useAppStore.setState((state) => {
+          const newConns = { ...state.voiceConnections };
+          if (newConns[user.id]) {
+            newConns[user.id] = { ...newConns[user.id], isDeafened: newDeafened };
+          }
+          return { voiceConnections: newConns };
+        });
+        try {
+          await fetch('/api/voice/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, isDeafened: newDeafened })
+          });
+        } catch (e) {
+          console.error('Failed to sync deafen state:', e);
+        }
+      }
+    },
+    {
+      id: 'edit-profile',
+      label: 'Edit Per-server Profile',
+      onClick: () => {}
+    },
+    {
+      id: 'apps',
+      label: 'Apps',
+      rightIcon: <ChevronRight size={14} />
+    },
+    {
+      id: 'roles',
+      label: 'Roles',
+      rightIcon: <ChevronRight size={14} />
+    },
+    { divider: true, id: 'd2', label: '' },
+    {
+      id: 'mod-view',
+      label: 'Open in Mod View'
+    },
+    {
+      id: 'server-mute',
+      label: 'Server Mute',
+      checked: !!voiceConnection?.isMuted,
+      disabled: !isServerOwner,
+      onClick: async () => {
+        const newMuted = !voiceConnection?.isMuted;
+        useAppStore.setState((state) => {
+          const newConns = { ...state.voiceConnections };
+          if (newConns[user.id]) {
+            newConns[user.id] = { ...newConns[user.id], isMuted: newMuted };
+          }
+          return { voiceConnections: newConns };
+        });
+        try {
+          await fetch('/api/voice/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, isMuted: newMuted })
+          });
+        } catch (e) {
+          console.error('Failed to sync server mute state:', e);
+        }
+      }
+    },
+    {
+      id: 'server-deafen',
+      label: 'Server Deafen',
+      checked: !!voiceConnection?.isDeafened,
+      disabled: !isServerOwner,
+      onClick: async () => {
+        const newDeafened = !voiceConnection?.isDeafened;
+        useAppStore.setState((state) => {
+          const newConns = { ...state.voiceConnections };
+          if (newConns[user.id]) {
+            newConns[user.id] = { ...newConns[user.id], isDeafened: newDeafened };
+          }
+          return { voiceConnections: newConns };
+        });
+        try {
+          await fetch('/api/voice/state', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id, isDeafened: newDeafened })
+          });
+        } catch (e) {
+          console.error('Failed to sync server deafen state:', e);
+        }
+      }
+    },
+    { divider: true, id: 'd3', label: '' },
+    {
+      id: 'copy-id',
+      label: 'Copy User ID',
+      rightIcon: <span className="text-[10px] font-bold bg-[#383a40] text-[#dbdee1] px-1 py-0.5 rounded">ID</span>,
+      onClick: () => navigator.clipboard.writeText(user.id)
+    }
+  ];
+
+  return (
+    <ContextMenu items={contextMenuItems} className="w-full">
+      <div className={cn(
+        "flex items-center gap-2 px-2 py-0.5 group transition-all duration-300 rounded hover:bg-surface-3/50 cursor-pointer select-none",
+        isConnecting && "opacity-35 brightness-75 select-none pointer-events-none"
+      )}>
+        <div className={cn(
+          "rounded-full transition-all duration-300 shrink-0",
+          isSpeaking && !isConnecting ? "ring-2 ring-success ring-offset-1 ring-offset-surface-1 scale-105" : "ring-0"
+        )}>
+          <Avatar src={user.avatarUrl} alt={user.username} size="xs" showStatus={false} />
+        </div>
+        <span className={cn(
+          "text-[11px] font-medium truncate transition-colors flex-1",
+          isSpeaking && !isConnecting ? "text-success" : "text-text-secondary group-hover:text-text-primary"
+        )}>
+          {user.username}
+          {isConnecting && (
+            <span className="text-[9px] text-[#f0b232] ml-1.5 font-bold uppercase tracking-tight select-none">
+              Connecting...
+            </span>
+          )}
+        </span>
+        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+          {isMuted && <MicOff size={13} className="text-[#f23f43] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
+          {isDeafened && <HeadphoneOff size={13} className="text-[#f23f43] drop-shadow-[0_1px_2px_rgba(0,0,0,0.4)]" />}
+        </div>
+      </div>
+      <UserProfileModal userId={user.id} isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
+    </ContextMenu>
+  );
+};
+
+const ChannelItem: React.FC<{ channel: any, icon: React.ReactNode, isActive: boolean, onClick: () => void, mentionCount?: number, hasDraft?: boolean }> = ({ channel, icon, isActive, onClick, mentionCount, hasDraft }) => {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded text-[13px] font-bold transition-all text-left outline-none border border-transparent ring-0 focus:ring-0 focus:outline-none uppercase tracking-tight relative group",
+        isActive
+          ? "bg-surface-3 text-text-primary border-border"
+          : "text-text-muted hover:text-text-secondary hover:bg-surface-2"
+      )}
+    >
+      <span className={cn("shrink-0", isActive ? "text-text-primary" : "text-text-muted")}>{icon}</span>
+      <span className="truncate flex-1">{channel.name}</span>
+      <div className="flex items-center gap-1.5">
+        {hasDraft && !isActive && (
+          <Pencil size={10} className="text-text-muted opacity-40 group-hover:opacity-100 transition-opacity" />
+        )}
+        {mentionCount !== undefined && mentionCount > 0 && !isActive && (
+          <span className="min-w-[16px] h-4 flex items-center justify-center rounded-full bg-danger text-white text-[9px] font-bold px-1">
+            {mentionCount}
+          </span>
+        )}
+      </div>
+    </button>
+  );
+};

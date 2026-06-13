@@ -1,0 +1,73 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import React, { useState, useEffect } from 'react';
+import { AppSidebar } from './components/layout/AppSidebar';
+import { ChatArea } from './components/layout/ChatArea';
+import { RightSidebar } from './components/layout/RightSidebar';
+import { SettingsModal } from './components/SettingsModal';
+import { ExplorePage } from './components/layout/ExplorePage';
+import { LoginScreen } from './components/Login.tsx';
+import { NotificationCenter } from './components/notifications/NotificationCenter';
+import { VoiceChannelView } from './components/layout/VoiceChannelView';
+import { Spotlight } from './components/ui/Spotlight';
+import { ComingSoonModal } from './components/modals/ComingSoonModal';
+import { DraftsView } from './components/layout/DraftsView';
+import { DialogManager } from './components/modals/DialogManager';
+import { useAppStore } from './store/useAppStore';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+
+export default function App() {
+  const { isExploreOpen, isDraftsOpen, isLoggedIn, isNotificationsOpen, setNotificationsOpen, voiceState, channels, activeChannelId, isRightSidebarOpen } = useAppStore();
+  const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
+
+  useKeyboardShortcuts();
+
+  // Listen for Ctrl+K → open Spotlight instead of basic search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsSpotlightOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  if (!isLoggedIn) {
+    return <LoginScreen />;
+  }
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-surface-1 text-text-primary antialiased font-sans">
+      <AppSidebar />
+      <div className="flex flex-1 overflow-hidden relative bg-surface-0">
+        {isExploreOpen ? (
+          <ExplorePage />
+        ) : isDraftsOpen ? (
+          <DraftsView />
+        ) : (() => {
+          const activeChannel = channels.find(c => c.id === activeChannelId);
+          const isVoice = activeChannel?.type === 'voice';
+          return (
+            <>
+              {isVoice && activeChannel ? (
+                <VoiceChannelView channelId={activeChannel.id} />
+              ) : (
+                <ChatArea />
+              )}
+              {isRightSidebarOpen && <RightSidebar />}
+            </>
+          );
+        })()}
+      </div>
+      <SettingsModal />
+      <NotificationCenter isOpen={isNotificationsOpen} onClose={() => setNotificationsOpen(false)} />
+      <Spotlight isOpen={isSpotlightOpen} onClose={() => setIsSpotlightOpen(false)} />
+      <ComingSoonModal />
+      <DialogManager />
+    </div>
+  );
+}

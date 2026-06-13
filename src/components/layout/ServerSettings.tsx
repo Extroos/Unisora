@@ -1,0 +1,1243 @@
+import React, { useState, useEffect } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { X, Hash, Shield, Users, Bell, Paintbrush, Trash2, Plus, ChevronRight, Settings, Search, ArrowRight, Link, Copy, Volume2, Megaphone, Mic } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn } from '../../lib/utils';
+import { Avatar } from '../ui/Avatar';
+import { Button } from '../ui/Button';
+import { CreateInviteModal } from '../modals/CreateInviteModal';
+import { CreateChannelModal } from '../modals/CreateChannelModal';
+
+interface ServerSettingsProps {
+  isOpen: boolean;
+  onClose: () => void;
+  serverId: string;
+}
+
+export function ServerSettings({ isOpen, onClose, serverId }: ServerSettingsProps) {
+  const { 
+    servers, channels, categories, users, 
+    updateServer, deleteServer, updateMemberRole, 
+    addServerRole, updateServerRole, deleteServerRole, 
+    updateServerSettings, addChannel, updateChannel, 
+    deleteChannel, addCategory, openDialog, getPermissions,
+    invites, createInvite, deleteInvite, currentUser, presences
+  } = useAppStore();
+  const [activeTab, setActiveTab] = useState('overview');
+  const [memberSearch, setMemberSearch] = useState('');
+  const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
+  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [activeRoleMenuUserId, setActiveRoleMenuUserId] = useState<string | null>(null);
+  const [createChannelCategory, setCreateChannelCategory] = useState<string | null>(null);
+  
+  const server = servers.find(s => s.id === serverId);
+
+  const [bannerScale, setBannerScale] = useState(1);
+  const [bannerPosX, setBannerPosX] = useState(50);
+  const [bannerPosY, setBannerPosY] = useState(50);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number; px: number; py: number } | null>(null);
+
+  useEffect(() => {
+    if (server) {
+      setBannerScale(server.settings?.bannerScale ?? 1);
+      setBannerPosX(server.settings?.bannerPositionX ?? 50);
+      setBannerPosY(server.settings?.bannerPositionY ?? 50);
+    }
+  }, [serverId, server?.settings?.bannerScale, server?.settings?.bannerPositionX, server?.settings?.bannerPositionY]);
+
+  if (!server) return null;
+
+  const serverChannels = channels.filter(c => c.serverId === serverId);
+  const serverCategories = categories.filter(c => c.serverId === serverId);
+  const members = server.members.map(id => users[id]).filter(Boolean);
+  const userPerms = getPermissions(serverId, currentUser?.id || 'u1');
+  const isAdmin = userPerms.includes('ADMIN');
+  const canManageServer = userPerms.includes('MANAGE_SERVER') || isAdmin;
+  const canManageChannels = userPerms.includes('MANAGE_CHANNELS') || isAdmin;
+  const canManageRoles = userPerms.includes('MANAGE_ROLES') || isAdmin;
+  const canKick = userPerms.includes('KICK_MEMBERS') || isAdmin;
+  const canBan = userPerms.includes('BAN_MEMBERS') || isAdmin;
+
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: Settings, visible: canManageServer },
+    { id: 'channels', label: 'Channels', icon: Hash, visible: canManageChannels },
+    { id: 'members', label: 'Members', icon: Users, visible: canKick || canBan },
+    { id: 'roles', label: 'Roles', icon: Shield, visible: canManageRoles },
+    { id: 'audit-log', label: 'Audit Log', icon: Shield, visible: canManageServer },
+    { id: 'safety', label: 'Safety', icon: Shield, visible: canManageServer },
+    { id: 'invites', label: 'Invites', icon: Link, visible: canManageServer },
+    { id: 'insights', label: 'Insights', icon: Paintbrush, visible: canManageServer },
+    { id: 'notifications', label: 'Notifications', icon: Bell, visible: true },
+    { id: 'appearance', label: 'Appearance', icon: Paintbrush, visible: canManageServer },
+  ].filter(t => t.visible);
+
+  const handleDeleteServer = () => {
+    openDialog({
+      type: 'confirm',
+      title: 'Delete Space',
+      description: `Are you absolutely sure you want to delete "${server.name}"? This action is permanent and all data will be lost.`,
+      confirmLabel: 'Delete Space',
+      isDanger: true,
+      onConfirm: () => {
+        deleteServer(server.id);
+        onClose();
+      }
+    });
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-100 flex items-center justify-end overflow-hidden">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="absolute inset-0 bg-black/40" />
+          <motion.div
+            initial={{ opacity: 0, x: "100%" }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 200 }}
+            className="absolute right-0 top-0 bottom-0 w-full max-w-4xl bg-surface-1 border-l border-border shadow-2xl flex"
+          >
+            {/* Sidebar */}
+            <div className="w-[200px] bg-surface-2 border-r border-border flex flex-col py-5">
+              <div className="px-3 mb-3">
+                <h2 className="text-xs font-bold text-text-primary truncate pl-2">{server.name}</h2>
+                <p className="text-[10px] text-text-muted pl-2 mt-0.5">Server Settings</p>
+              </div>
+              <div className="flex-1 overflow-y-auto px-2 space-y-0.5">
+                {tabs.map(tab => {
+                  const Icon = tab.icon;
+                  return (
+                    <button 
+                      key={tab.id} 
+                      onClick={() => setActiveTab(tab.id)} 
+                      className={cn(
+                        "w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium transition-colors text-left", 
+                        activeTab === tab.id ? "bg-surface-3 text-white" : "text-text-tertiary hover:bg-surface-3 hover:text-text-secondary"
+                      )}
+                    >
+                      <Icon size={14} />{tab.label}
+                    </button>
+                  );
+                })}
+                <div className="h-px bg-border my-2 mx-2" />
+                <button 
+                  onClick={handleDeleteServer}
+                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded text-[13px] font-medium text-danger hover:bg-danger/10 transition-colors text-left"
+                >
+                  <Trash2 size={14} />Delete Space
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                <h3 className="text-lg font-bold text-text-primary capitalize">{activeTab}</h3>
+                <button onClick={onClose} className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-3/50 hover:bg-surface-3 text-text-tertiary hover:text-text-primary transition-all"><X size={16} /></button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                {activeTab === 'overview' && (
+                  <div className="space-y-8 max-w-lg animate-fade-in-up">
+                    <div className="space-y-6">
+                      <div>
+                        <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Server Identity</label>
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-[11px] text-text-tertiary mb-1.5 ml-1">Server Name</p>
+                            <input 
+                              type="text" 
+                              defaultValue={server.name} 
+                              onChange={(e) => updateServer(server.id, { name: e.target.value })}
+                              className="w-full bg-surface-2 border border-border rounded px-4 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-all" 
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Visual Identity</label>
+                        <div className="flex items-center gap-6 p-4 bg-surface-2 border border-border rounded-lg">
+                          <div className="relative group cursor-pointer">
+                            {server.iconUrl ? (
+                              <img src={server.iconUrl} alt="" className="w-20 h-20 rounded-lg border border-border object-cover shadow-md group-hover:opacity-75 transition-opacity" />
+                            ) : (
+                              <div className="w-20 h-20 rounded-lg bg-surface-3 border border-border flex items-center justify-center text-2xl font-bold text-text-secondary shadow-md group-hover:bg-surface-4 transition-colors">{server.name[0]}</div>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            <h4 className="text-sm font-bold text-text-primary">Server Icon</h4>
+                            <p className="text-[11px] text-text-tertiary leading-relaxed max-w-[200px]">Customize your space's appearance.</p>
+                            <Button 
+                              variant="secondary" 
+                              size="sm"
+                              onClick={() => {
+                                openDialog({
+                                  type: 'input',
+                                  title: 'Update Icon',
+                                  description: 'Enter a URL for your space icon.',
+                                  placeholder: 'https://...',
+                                  defaultValue: server.iconUrl || '',
+                                  onConfirm: (url) => updateServer(server.id, { iconUrl: url })
+                                });
+                              }}
+                            >
+                              Upload Image
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <Button variant="primary" size="md" onClick={onClose}>Save Changes</Button>
+                  </div>
+                )}
+
+                {activeTab === 'audit-log' && (
+                  <div className="space-y-6 animate-fade-in-up">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-text-primary">Audit Log</h4>
+                        <p className="text-xs text-text-muted">A record of all administrative actions in this space.</p>
+                      </div>
+                      <div className="flex gap-2">
+                         <div className="relative">
+                           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                           <input type="text" placeholder="Filter by user or action..." className="bg-surface-2 border border-border rounded-lg py-1.5 pl-8 pr-3 text-[11px] text-text-primary focus:outline-none focus:border-accent/40 w-48" />
+                         </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      {(server.auditLogs || []).map(log => {
+                        const executor = users[log.executorId];
+                        return (
+                          <div key={log.id} className="bg-surface-2 border border-border rounded p-2.5 flex items-start gap-3 hover:bg-surface-3 transition-colors">
+                            <Avatar src={executor?.avatarUrl} alt={executor?.username} size="sm" showStatus={false} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[13px] font-bold text-text-primary">{executor?.username}</span>
+                                <span className="text-[13px] text-text-muted">
+                                  {log.action === 'CHANNEL_CREATE' && `created channel #${log.targetName}`}
+                                  {log.action === 'CHANNEL_DELETE' && `deleted channel #${log.targetName}`}
+                                  {log.action === 'CHANNEL_UPDATE' && `updated channel #${log.targetName}`}
+                                  {log.action === 'ROLE_CREATE' && `created role ${log.targetName}`}
+                                  {log.action === 'ROLE_DELETE' && `deleted role ${log.targetName}`}
+                                  {log.action === 'ROLE_UPDATE' && `updated role ${log.targetName}`}
+                                  {log.action === 'SERVER_UPDATE' && `updated the space settings`}
+                                  {log.action === 'MEMBER_KICK' && `kicked ${log.targetName}`}
+                                  {log.action === 'MEMBER_BAN' && `banned ${log.targetName}`}
+                                  {log.action === 'MEMBER_ROLE_UPDATE' && `updated roles for ${log.targetName}`}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-text-muted mt-1 flex items-center gap-2">
+                                <span>{new Date(log.timestamp).toLocaleString()}</span>
+                                {log.changes && <span className="w-1 h-1 bg-border rounded-full" />}
+                                {log.changes && (
+                                  <button 
+                                    onClick={() => setExpandedLogId(expandedLogId === log.id ? null : log.id)}
+                                    className="text-accent cursor-pointer hover:underline font-bold uppercase tracking-widest text-[9px]"
+                                  >
+                                    {expandedLogId === log.id ? 'Hide Changes' : 'View Changes'}
+                                  </button>
+                                )}
+                              </div>
+
+                              <AnimatePresence>
+                                {expandedLogId === log.id && log.changes && (
+                                  <motion.div 
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden"
+                                  >
+                                    <div className="mt-3 p-3 bg-surface-3 rounded-lg border border-border/40 font-mono text-[11px] space-y-2">
+                                      {log.changes.map((change, i) => (
+                                        <div key={i} className="flex gap-4">
+                                          <span className="text-text-tertiary w-20 shrink-0">{change.field}:</span>
+                                          <div className="flex flex-1 items-center gap-2 overflow-hidden">
+                                            <span className="text-danger bg-danger/10 px-1.5 py-0.5 rounded truncate max-w-[150px]">{JSON.stringify(change.old)}</span>
+                                            <ArrowRight size={12} className="text-text-muted shrink-0" />
+                                            <span className="text-success bg-success/10 px-1.5 py-0.5 rounded truncate max-w-[150px]">{JSON.stringify(change.new)}</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {(!server.auditLogs || server.auditLogs.length === 0) && (
+                        <div className="text-center py-12 border-2 border-dashed border-border rounded-2xl">
+                          <p className="text-sm text-text-muted">No audit logs found for this space.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'insights' && (
+                   <div className="space-y-6 animate-fade-in-up">
+                      <div className="grid grid-cols-3 gap-3">
+                        {[
+                          { label: 'Total Messages', value: server.insights?.totalMessages || 0, trend: '+12%', color: 'bg-accent' },
+                          { label: 'Active Members', value: server.insights?.activeMembers || 0, trend: '+5%', color: 'bg-success' },
+                          { label: 'Growth Rate', value: `${server.insights?.growthRate || 0}%`, trend: '+2%', color: 'bg-warning' },
+                        ].map((stat, i) => (
+                          <div key={i} className="bg-surface-2 border border-border rounded-md p-4">
+                            <div className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-1">{stat.label}</div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-xl font-bold text-white">{stat.value}</span>
+                              <span className="text-[10px] font-bold text-success bg-success/10 px-1 py-0.5 rounded">{stat.trend}</span>
+                            </div>
+                            <div className="h-1 bg-surface-3 rounded-full mt-3 overflow-hidden">
+                              <motion.div 
+                                initial={{ width: 0 }}
+                                animate={{ width: '70%' }}
+                                transition={{ duration: 1, delay: i * 0.1 }}
+                                className={cn("h-full rounded-full", stat.color)}
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="bg-surface-2 border border-border rounded-md overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-border/50">
+                          <h4 className="text-[13px] font-bold text-text-primary">Engagement Analytics</h4>
+                          <div className="flex items-center gap-2">
+                             <span className="text-[10px] font-bold text-text-muted uppercase tracking-widest">Interval:</span>
+                             <select className="bg-surface-3 border border-border rounded px-2 py-1 text-[10px] font-bold text-text-secondary outline-none uppercase tracking-wider">
+                               <option>7D</option>
+                               <option>30D</option>
+                             </select>
+                          </div>
+                        </div>
+                        <div className="p-6">
+                           <div className="h-[180px] flex items-end gap-3 pb-2">
+                            {[40, 70, 45, 90, 65, 80, 55].map((h, i) => (
+                              <div key={i} className="flex-1 flex flex-col items-center gap-2 group cursor-pointer h-full justify-end">
+                                <div className="w-full relative h-full flex items-end">
+                                  <motion.div 
+                                    initial={{ height: 0 }}
+                                    animate={{ height: `${h}%` }}
+                                    transition={{ duration: 0.8, delay: i * 0.05 }}
+                                    className="w-full bg-accent/40 border-t border-accent rounded-t transition-all group-hover:bg-accent/60" 
+                                  />
+                                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-3 text-[10px] font-bold text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity border border-border pointer-events-none">
+                                    {Math.round(h * 12.5)}
+                                  </div>
+                                </div>
+                                <span className="text-[10px] font-bold text-text-muted uppercase">{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                   </div>
+                )}
+
+                {activeTab === 'safety' && (
+                  <div className="space-y-6 animate-fade-in-up">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-text-primary">Safety Setup</h4>
+                        <p className="text-xs text-text-muted">Configure how members join and interact with your community.</p>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      {[
+                        { id: 'verify', label: 'Membership Verification', desc: 'Require members to verify their email before they can send messages.', active: server.settings?.verification || false },
+                        { id: 'automod', label: 'AutoMod', desc: 'Automatically block common spam and harmful content.', active: server.settings?.automod || false },
+                        { id: 'slowmode', label: 'Slow Mode', desc: 'Limit how often members can send messages in all channels.', active: (server.settings?.slowMode || 0) > 0 }
+                      ].map(rule => (
+                        <div key={rule.id} className="p-4 bg-surface-2 border border-border rounded-lg flex items-center justify-between hover:bg-surface-3 transition-all">
+                          <div className="flex-1 pr-6">
+                            <h5 className="text-[14px] font-bold text-text-primary">{rule.label}</h5>
+                            <p className="text-[12px] text-text-tertiary mt-1 leading-relaxed">{rule.desc}</p>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              if (rule.id === 'slowmode') {
+                                if (rule.active) updateServerSettings(server.id, { slowMode: 0 });
+                                else {
+                                  openDialog({
+                                    type: 'input',
+                                    title: 'Enable Slow Mode',
+                                    description: 'Enter the cooldown in seconds (1-3600).',
+                                    placeholder: '5',
+                                    onConfirm: (val) => {
+                                      const sec = parseInt(val);
+                                      if (!isNaN(sec)) updateServerSettings(server.id, { slowMode: sec });
+                                    }
+                                  });
+                                }
+                              } else {
+                                updateServerSettings(server.id, { [rule.id === 'verify' ? 'verification' : 'automod']: !rule.active });
+                              }
+                            }}
+                            className={cn("w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0", rule.active ? "bg-success" : "bg-surface-4")}
+                          >
+                            <div 
+                              style={{ left: rule.active ? '24px' : '4px' }}
+                              className="absolute top-1 w-3 h-3 rounded-full bg-white transition-all" 
+                            />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'channels' && (
+                  <div className="space-y-6 animate-fade-in-up">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary">Space Channels</h3>
+                        <p className="text-[11px] text-text-tertiary">Organize your space with text, voice, and announcement channels.</p>
+                      </div>
+                      <Button variant="secondary" size="sm" icon={<Plus size={14} />} onClick={() => {
+                        openDialog({
+                          type: 'input',
+                          title: 'New Category',
+                          description: 'Group your channels into categories.',
+                          placeholder: 'Category Name',
+                          onConfirm: (name) => addCategory(server.id, name)
+                        });
+                      }}>New Category</Button>
+                    </div>
+
+                    <div className="space-y-4">
+                      {serverCategories.sort((a, b) => a.order - b.order).map(cat => (
+                        <div key={cat.id} className="bg-surface-2 border border-border rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em]">{cat.name}</h4>
+                            <button onClick={() => setCreateChannelCategory(cat.id)} className="p-1 hover:bg-surface-3 rounded-md text-text-tertiary hover:text-accent transition-colors"><Plus size={14} /></button>
+                          </div>
+                          <div className="space-y-1">
+                            {serverChannels.filter(c => c.categoryId === cat.id).map(ch => {
+                              const getIcon = (type: string) => {
+                                switch (type) {
+                                  case 'voice': return Volume2;
+                                  case 'announcement': return Megaphone;
+                                  case 'stage': return Mic;
+                                  default: return Hash;
+                                }
+                              };
+                              const ChannelIcon = getIcon(ch.type);
+
+                              return (
+                                <div key={ch.id} className="flex items-center justify-between p-2.5 bg-surface-1/50 border border-white/5 rounded-lg group hover:border-white/10">
+                                  <div className="flex items-center gap-2.5">
+                                    <ChannelIcon size={14} className="text-text-muted" />
+                                    <span className="text-sm font-medium text-text-secondary">{ch.name}</span>
+                                    {ch.type !== 'text' && (
+                                      <span className="text-[9px] font-bold text-text-tertiary uppercase tracking-wider bg-surface-3 px-1.5 py-0.5 rounded">
+                                        {ch.type === 'announcement' ? 'news' : ch.type}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => {
+                                      openDialog({
+                                        type: 'input',
+                                        title: 'Rename Channel',
+                                        description: 'Enter a new name for this channel.',
+                                        defaultValue: ch.name,
+                                        onConfirm: (name) => updateChannel(ch.id, { name })
+                                      });
+                                    }} className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-3"><Settings size={14} /></button>
+                                    <button onClick={() => {
+                                      openDialog({
+                                        type: 'confirm',
+                                        title: 'Delete Channel',
+                                        description: `Are you sure you want to delete #${ch.name}? All message history will be lost.`,
+                                        confirmLabel: 'Delete',
+                                        isDanger: true,
+                                        onConfirm: () => deleteChannel(ch.id)
+                                      });
+                                    }} className="p-1.5 rounded-md text-text-muted hover:text-danger hover:bg-danger/10"><Trash2 size={14} /></button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'members' && (
+                  <div className="space-y-4 animate-fade-in-up">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary">Member Directory</h3>
+                        <p className="text-[11px] text-text-tertiary">
+                          {members.length} members · <span className="text-success font-bold">
+                            {members.filter(m => presences[m.id]?.isOnline).length} online
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="relative group">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted group-focus-within:text-accent transition-colors" size={16} />
+                      <input 
+                        type="text" 
+                        placeholder="Search members..." 
+                        className="w-full bg-surface-2 border border-border rounded py-2 pl-11 pr-4 text-sm text-text-primary focus:outline-none focus:border-accent transition-all"
+                        value={memberSearch}
+                        onChange={(e) => setMemberSearch(e.target.value)}
+                      />
+                    </div>
+                    
+                    <div className="space-y-1 mt-4">
+                      {members.filter(m => m.username.toLowerCase().includes(memberSearch.toLowerCase())).map(m => {
+                        const isOwner = m.id === server.ownerId;
+                        const userRoles = server.memberRoles?.[m.id] || [];
+                        
+                        const canEditMemberRoles = 
+                          currentUser?.id === server.ownerId || 
+                          ((canManageRoles || isAdmin) && m.id !== server.ownerId);
+
+                        const canKickOrBan = 
+                          !isOwner && 
+                          (currentUser?.id === server.ownerId || ((canKick || canBan) && m.id !== server.ownerId));
+
+                        return (
+                          <div key={m.id} className="flex items-center justify-between p-4 bg-surface-2 border border-border rounded-xl group hover:bg-surface-3/80 hover:border-border-hover hover:shadow-md transition-all duration-200">
+                            <div className="flex items-center gap-3.5 min-w-[220px]">
+                              <Avatar src={m.avatarUrl} alt={m.username} size="md" status={m.status} />
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-bold text-text-primary group-hover:text-white transition-colors">{m.username}</span>
+                                  {isOwner && (
+                                    <div className="px-1.5 py-0.5 rounded bg-warning/10 text-warning text-[8px] font-bold uppercase tracking-widest border border-warning/20">
+                                      Owner
+                                    </div>
+                                  )}
+                                  {/* Live presence badge */}
+                                  {(() => {
+                                    const p = presences[m.id];
+                                    if (!p?.isOnline) return null;
+                                    if (p.activeChannelId) {
+                                      const ch = channels.find(c => c.id === p.activeChannelId && c.serverId === serverId);
+                                      if (ch) return (
+                                        <span className="text-[9px] font-bold text-accent bg-accent/10 px-1.5 py-0.5 rounded-full border border-accent/20 flex items-center gap-1">
+                                          <span className="w-1 h-1 rounded-full bg-accent animate-pulse inline-block" />
+                                          #{ch.name}
+                                        </span>
+                                      );
+                                    }
+                                    return (
+                                      <span className="text-[9px] font-bold text-success bg-success/10 px-1.5 py-0.5 rounded-full border border-success/20">
+                                        Online
+                                      </span>
+                                    );
+                                  })()}
+                                </div>
+                                <span className="text-[10px] text-text-tertiary mt-0.5 font-mono">ID: {m.id}</span>
+                              </div>
+                            </div>
+                            
+                            {/* Role Badges */}
+                            <div className="flex-1 flex flex-wrap gap-1.5 px-4 items-center">
+                              {userRoles.map(roleId => {
+                                const r = server.roles.find(role => role.id === roleId);
+                                if (!r) return null;
+                                return (
+                                  <span 
+                                    key={roleId}
+                                    style={{ borderColor: r.color + '44', color: r.color, backgroundColor: r.color + '11' }}
+                                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold border shadow-sm"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: r.color }} />
+                                    {r.name}
+                                    {canEditMemberRoles && (
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          updateMemberRole(server.id, m.id, userRoles.filter(id => id !== roleId));
+                                        }}
+                                        className="hover:bg-white/10 rounded p-0.5 ml-1 transition-colors text-text-muted hover:text-white"
+                                      >
+                                        <X size={10} />
+                                      </button>
+                                    )}
+                                  </span>
+                                );
+                              })}
+                              
+                              {/* Add Role Button */}
+                              {canEditMemberRoles && (
+                                <div className="relative">
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveRoleMenuUserId(activeRoleMenuUserId === m.id ? null : m.id);
+                                    }}
+                                    className="flex items-center justify-center w-6 h-6 rounded bg-surface-1 hover:bg-surface-3 text-text-muted hover:text-white transition-colors border border-border shadow-sm"
+                                    title="Add Role"
+                                  >
+                                    <Plus size={12} />
+                                  </button>
+                                  
+                                  {/* Dropdown Menu for Roles */}
+                                  {activeRoleMenuUserId === m.id && (
+                                    <>
+                                      <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setActiveRoleMenuUserId(null); }} />
+                                      <div className="absolute left-0 top-7 z-40 w-48 bg-surface-3 border border-border rounded-lg shadow-2xl py-1.5 overflow-hidden">
+                                        <div className="px-3 py-1 text-[9px] font-bold text-text-muted uppercase tracking-wider border-b border-border/50 mb-1">
+                                          Toggle Roles
+                                        </div>
+                                        <div className="max-h-48 overflow-y-auto custom-scrollbar">
+                                          {server.roles.map(role => {
+                                            const hasRole = userRoles.includes(role.id);
+                                            return (
+                                              <button
+                                                key={role.id}
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const newRoles = hasRole 
+                                                    ? userRoles.filter(id => id !== role.id) 
+                                                    : [...userRoles, role.id];
+                                                  updateMemberRole(server.id, m.id, newRoles);
+                                                }}
+                                                className="w-full flex items-center justify-between px-3 py-2 text-xs text-text-secondary hover:bg-surface-4 hover:text-white transition-colors text-left"
+                                              >
+                                                <div className="flex items-center gap-2">
+                                                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: role.color }} />
+                                                  <span className="font-semibold">{role.name}</span>
+                                                </div>
+                                                {hasRole && <span className="text-accent text-xs font-bold">✓</span>}
+                                              </button>
+                                            );
+                                          })}
+                                          {server.roles.length === 0 && (
+                                            <div className="px-3 py-2 text-xs text-text-muted italic">No roles configured</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {canKickOrBan && (
+                                <>
+                                  <button 
+                                    onClick={() => {
+                                      openDialog({
+                                        type: 'confirm',
+                                        title: 'Kick Member',
+                                        description: `Are you sure you want to kick ${m.username}? They will be able to rejoin with an invite.`,
+                                        confirmLabel: 'Kick',
+                                        isDanger: true,
+                                        onConfirm: () => useAppStore.getState().kickMember(server.id, m.id)
+                                      });
+                                    }}
+                                    className="p-2 rounded-lg text-text-muted hover:text-warning hover:bg-warning/10 transition-all"
+                                    title="Kick Member"
+                                  >
+                                    <Trash2 size={15} className="rotate-180" />
+                                  </button>
+                                  <button 
+                                    onClick={() => {
+                                      openDialog({
+                                        type: 'confirm',
+                                        title: 'Ban Member',
+                                        description: `Are you sure you want to permanently ban ${m.username}? This action is irreversible.`,
+                                        confirmLabel: 'Ban',
+                                        isDanger: true,
+                                        onConfirm: () => useAppStore.getState().banMember(server.id, m.id)
+                                      });
+                                    }}
+                                    className="p-2 rounded-lg text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+                                    title="Ban Member"
+                                  >
+                                    <Shield size={15} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'roles' && (
+                  <div className="h-full flex flex-col animate-fade-in-up">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-sm font-bold text-text-primary">Community Roles</h3>
+                        <p className="text-[11px] text-text-tertiary">Manage permissions and identification.</p>
+                      </div>
+                      <Button variant="primary" size="sm" icon={<Plus size={14} />} onClick={() => {
+                        openDialog({
+                          type: 'input',
+                          title: 'Create Role',
+                          description: 'Enter a name for the new role.',
+                          placeholder: 'New Role',
+                          onConfirm: (name) => {
+                            const id = `r_${Date.now()}`;
+                            addServerRole(server.id, { id, name, color: '#99aab5', permissions: [], hoist: false });
+                            setSelectedRoleId(id);
+                          }
+                        });
+                      }}>Create Role</Button>
+                    </div>
+
+                    <div className="flex-1 flex gap-6 overflow-hidden">
+                      {/* Role List */}
+                      <div className="w-[240px] flex flex-col gap-0.5 overflow-y-auto custom-scrollbar pr-2">
+                        {server.roles.map((role) => (
+                          <button
+                            key={role.id}
+                            onClick={() => setSelectedRoleId(role.id)}
+                            className={cn(
+                              "flex items-center justify-between p-2.5 rounded transition-all border text-left group",
+                              selectedRoleId === role.id 
+                                ? "bg-surface-3 border-accent text-white" 
+                                : "bg-surface-2 border-border/50 hover:bg-surface-3 hover:border-border"
+                            )}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-3 h-3 rounded-full" style={{ backgroundColor: role.color }} />
+                              <span className={cn("text-[13px] font-bold", selectedRoleId === role.id ? "text-white" : "text-text-secondary")}>{role.name}</span>
+                            </div>
+                            <ChevronRight size={14} className={cn("transition-transform", selectedRoleId === role.id ? "text-white" : "text-text-muted opacity-0 group-hover:opacity-100")} />
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Role Editor */}
+                      <div className="flex-1 bg-surface-2 border border-border rounded-lg overflow-y-auto custom-scrollbar p-6">
+                        {selectedRoleId ? (() => {
+                          const role = server.roles.find(r => r.id === selectedRoleId);
+                          if (!role) return null;
+                          const isProtected = role.name === 'Admin' || role.name === 'Member';
+
+                          return (
+                            <div className="space-y-8 animate-fade-in">
+                              <div className="space-y-6">
+                                <div>
+                                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Role Identity</label>
+                                  <div className="space-y-4">
+                                    <div>
+                                      <p className="text-[11px] text-text-tertiary mb-1.5 ml-1">Role Name</p>
+                                      <input 
+                                        type="text" 
+                                        value={role.name} 
+                                        disabled={isProtected}
+                                        onChange={(e) => updateServerRole(server.id, role.id, { name: e.target.value })}
+                                        className="w-full bg-surface-3 border border-border rounded px-4 py-2 text-sm text-text-primary focus:outline-none focus:border-accent transition-all disabled:opacity-50" 
+                                      />
+                                    </div>
+                                    <div className="flex items-center justify-between p-4 bg-surface-3 border border-border rounded">
+                                      <div className="flex-1 pr-4">
+                                        <h4 className="text-[13px] font-bold text-text-primary">Display role members separately</h4>
+                                        <p className="text-[11px] text-text-tertiary mt-0.5">Hoist members with this role in the sidebar.</p>
+                                      </div>
+                                      <button 
+                                          type="button"
+                                          onClick={() => updateServerRole(server.id, role.id, { hoist: !role.hoist })}
+                                          className={cn("w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0", role.hoist ? "bg-success" : "bg-surface-4")}
+                                        >
+                                          <div 
+                                            style={{ left: role.hoist ? '24px' : '4px' }}
+                                            className="absolute top-1 w-3 h-3 rounded-full bg-white transition-all" 
+                                          />
+                                        </button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Role Color</label>
+                                  <div className="grid grid-cols-10 gap-2">
+                                    {['#99AAB5', '#1ABC9C', '#2ECC71', '#3498DB', '#9B59B6', '#E91E63', '#F1C40F', '#E67E22', '#E74C3C', '#607D8B'].map(color => (
+                                      <button 
+                                        key={color}
+                                        onClick={() => updateServerRole(server.id, role.id, { color })}
+                                        className={cn(
+                                          "w-6 h-6 rounded-full border-2 transition-all hover:scale-110",
+                                          role.color.toLowerCase() === color.toLowerCase() ? "border-white/60 ring-2 ring-accent/20" : "border-transparent"
+                                        )}
+                                        style={{ backgroundColor: color }}
+                                      />
+                                    ))}
+                                  </div>
+                                </div>
+
+                                 <div>
+                                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Role Rules & Parameters</label>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between p-4 bg-surface-3 border border-border rounded">
+                                      <div className="flex-1 pr-4">
+                                        <h4 className="text-[13px] font-bold text-text-primary">Auto-assign to new members</h4>
+                                        <p className="text-[11px] text-text-tertiary mt-0.5">Automatically grant this role to users when they join the space.</p>
+                                      </div>
+                                      <button 
+                                        type="button"
+                                        onClick={() => updateServerRole(server.id, role.id, { autoAssignOnJoin: !role.autoAssignOnJoin })}
+                                        className={cn("w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0", role.autoAssignOnJoin ? "bg-success" : "bg-surface-4")}
+                                      >
+                                        <div 
+                                          style={{ left: role.autoAssignOnJoin ? '24px' : '4px' }}
+                                          className="absolute top-1 w-3 h-3 rounded-full bg-white transition-all" 
+                                        />
+                                      </button>
+                                    </div>
+                                    <div className="flex items-center justify-between p-4 bg-surface-3 border border-border rounded">
+                                      <div className="flex-1 pr-4">
+                                        <h4 className="text-[13px] font-bold text-text-primary">Muted / Restricted Role</h4>
+                                        <p className="text-[11px] text-text-tertiary mt-0.5 font-medium">Auto-mute members with this role. Block them from sending messages in any channels.</p>
+                                      </div>
+                                      <button 
+                                        type="button"
+                                        onClick={() => updateServerRole(server.id, role.id, { isRestricted: !role.isRestricted })}
+                                        className={cn("w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0", role.isRestricted ? "bg-success" : "bg-surface-4")}
+                                      >
+                                        <div 
+                                          style={{ left: role.isRestricted ? '24px' : '4px' }}
+                                          className="absolute top-1 w-3 h-3 rounded-full bg-white transition-all" 
+                                        />
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] mb-3 block">Permissions</label>
+                                  <div className="space-y-2">
+                                    {[
+                                      { id: 'ADMIN', label: 'Administrator', desc: 'Full access to all server settings and channels.' },
+                                      { id: 'MANAGE_SERVER', label: 'Manage Server', desc: 'Can change server name, icon, and categories.' },
+                                      { id: 'MANAGE_CHANNELS', label: 'Manage Channels', desc: 'Can create, edit, or delete channels.' },
+                                      { id: 'MANAGE_ROLES', label: 'Manage Roles', desc: 'Can create or edit roles below this one.' },
+                                      { id: 'SEND_MESSAGES', label: 'Send Messages', desc: 'Can send messages in all channels of this server.' },
+                                      { id: 'MANAGE_MESSAGES', label: 'Manage Messages', desc: 'Can pin or delete any messages sent by other members.' },
+                                      { id: 'KICK_MEMBERS', label: 'Kick Members', desc: 'Can remove members from the server.' },
+                                      { id: 'BAN_MEMBERS', label: 'Ban Members', desc: 'Can permanently ban members.' },
+                                      { id: 'MENTION_EVERYONE', label: 'Mention @everyone', desc: 'Can use @everyone to notify all members.' }
+                                    ].map(perm => {
+                                      const hasPerm = role.name === 'Admin' || role.permissions?.includes(perm.id);
+                                      return (
+                                        <div key={perm.id} className="flex items-center justify-between p-4 bg-surface-3 border border-border rounded">
+                                          <div className="flex-1 pr-4">
+                                            <h4 className="text-[13px] font-bold text-text-primary">{perm.label}</h4>
+                                            <p className="text-[11px] text-text-tertiary mt-0.5 leading-relaxed">{perm.desc}</p>
+                                          </div>
+                                          <button 
+                                             type="button"
+                                             onClick={() => {
+                                               if (role.name === 'Admin') return;
+                                               const perms = role.permissions || [];
+                                               const newPerms = perms.includes(perm.id) ? perms.filter(p => p !== perm.id) : [...perms, perm.id];
+                                               updateServerRole(server.id, role.id, { permissions: newPerms });
+                                             }}
+                                             className={cn("w-10 h-5 rounded-full transition-colors relative cursor-pointer shrink-0", hasPerm ? "bg-success" : "bg-surface-4", role.name === 'Admin' && "opacity-50 cursor-not-allowed")}
+                                           >
+                                             <div 
+                                               style={{ left: hasPerm ? '24px' : '4px' }}
+                                               className="absolute top-1 w-3 h-3 rounded-full bg-white transition-all" 
+                                             />
+                                           </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {!isProtected && (
+                                <div className="pt-6 border-t border-border">
+                                  <button 
+                                    onClick={() => {
+                                      openDialog({
+                                        type: 'confirm',
+                                        title: 'Delete Role',
+                                        description: `Are you sure you want to delete the role "${role.name}"? This cannot be undone.`,
+                                        confirmLabel: 'Delete',
+                                        isDanger: true,
+                                        onConfirm: () => {
+                                          deleteServerRole(server.id, role.id);
+                                          setSelectedRoleId(null);
+                                        }
+                                      });
+                                    }}
+                                    className="flex items-center gap-2 text-xs font-bold text-danger hover:underline"
+                                  >
+                                    <Trash2 size={14} /> Delete Role
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })() : (
+                          <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
+                            <Shield size={48} className="text-text-muted mb-4 stroke-[1px]" />
+                            <p className="text-sm font-medium text-text-tertiary">Select a role to edit its properties</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'notifications' && (
+                  <div className="space-y-6 animate-fade-in-up max-w-xl">
+                    <h3 className="text-sm font-bold text-text-primary">Notification Settings</h3>
+                    <div className="space-y-3">
+                      {[
+                        { id: 'all', label: 'All Messages', desc: 'Get notified for every new message.' },
+                        { id: 'mentions', label: 'Only @Mentions', desc: 'Only get notified when you are specifically mentioned.' },
+                        { id: 'nothing', label: 'Nothing', desc: 'Silence all notifications.' }
+                      ].map(opt => (
+                        <div 
+                          key={opt.id}
+                          onClick={() => updateServerSettings(server.id, { notifications: opt.id as any })}
+                          className={cn(
+                            "p-4 rounded border transition-all cursor-pointer",
+                            (server.settings?.notifications || 'all') === opt.id ? "bg-accent/10 border-accent" : "bg-surface-2 border-border hover:bg-surface-3"
+                          )}
+                        >
+                          <p className={cn("text-sm font-bold", (server.settings?.notifications || 'all') === opt.id ? "text-accent" : "text-text-primary")}>{opt.label}</p>
+                          <p className="text-[11px] text-text-tertiary">{opt.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'invites' && (
+                  <div className="space-y-6 animate-fade-in-up">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-text-primary">Server Invites</h4>
+                        <p className="text-xs text-text-muted">Manage the invitation codes for this space.</p>
+                      </div>
+                      <Button 
+                        variant="primary" 
+                        size="sm" 
+                        icon={<Plus size={14} />}
+                        onClick={() => setIsInviteModalOpen(true)}
+                      >
+                        Create New Invite
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {Object.values(invites).filter(i => i.serverId === server.id).map(invite => (
+                        <div key={invite.code} className="bg-surface-2 border border-border rounded-lg p-4 flex items-center justify-between group hover:bg-surface-3 transition-all">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded bg-surface-3 flex items-center justify-center text-accent font-mono font-bold border border-border">
+                              {invite.code}
+                            </div>
+                            <div className="flex flex-col">
+                               <span className="text-[13px] font-bold text-text-primary uppercase tracking-wider">Code: {invite.code}</span>
+                              <div className="flex items-center gap-2 text-[10px] text-text-muted font-medium mt-0.5">
+                                <span className="flex items-center gap-1"><Users size={10} /> {invite.uses} Uses</span>
+                                <span className="w-1 h-1 bg-border rounded-full" />
+                                <span>{invite.expiresAt ? `Expires ${new Date(invite.expiresAt).toLocaleDateString()}` : 'Never expires'}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(invite.code);
+                              }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-3 text-text-muted hover:text-text-primary transition-all"
+                              title="Copy Code"
+                            >
+                              <Copy size={14} />
+                            </button>
+                            <button 
+                              onClick={() => deleteInvite(invite.code)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface-3 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+                              title="Revoke Invite"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {Object.values(invites).filter(i => i.serverId === server.id).length === 0 && (
+                        <div className="py-12 border-2 border-dashed border-border rounded-2xl text-center">
+                          <div className="w-12 h-12 bg-surface-2 rounded-xl flex items-center justify-center mx-auto mb-4">
+                            <Link size={24} className="text-text-muted opacity-30" />
+                          </div>
+                          <p className="text-sm text-text-muted">No active invites for this space.</p>
+                          <p className="text-[10px] text-text-tertiary mt-1">Generate a code to invite your team.</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'appearance' && (
+                  <div className="space-y-8 animate-fade-in-up max-w-2xl">
+                    <div>
+                      <h3 className="text-sm font-bold text-text-primary mb-1">Space Branding</h3>
+                      <p className="text-xs text-text-muted mb-6">Customize how your space looks to members and visitors.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-8">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] block">Space Icon</label>
+                        <div className="flex items-center gap-6 p-6 bg-surface-2 border border-border rounded-lg border-dashed">
+                          <div className="w-20 h-20 rounded-lg bg-surface-3 flex items-center justify-center border border-border shadow-inner overflow-hidden shrink-0">
+                            {server.iconUrl ? <img src={server.iconUrl} className="w-full h-full object-cover" /> : <Hash size={32} className="text-text-muted opacity-30" />}
+                          </div>
+                          <div className="space-y-2">
+                            <Button variant="primary" size="sm">Upload Image</Button>
+                            <p className="text-[9px] text-text-muted font-medium leading-relaxed">Minimum 512x512px. JPG, PNG or GIF.</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] block">Space Banner</label>
+                        <div className="flex flex-col gap-4 p-4 bg-surface-2 border border-border rounded-lg border-dashed">
+                            
+                            {/* Drag to Position Preview Container */}
+                            <div className="space-y-1.5">
+                              <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block">Live Card Preview & Drag-to-Position</span>
+                              <div 
+                                className="h-[44px] w-full rounded-md bg-[#1e1f22] border border-border overflow-hidden flex items-center px-3 justify-between relative select-none"
+                                style={{ cursor: dragStart ? 'grabbing' : 'grab' }}
+                                onMouseDown={(e) => {
+                                  if (!server.bannerUrl) return;
+                                  e.preventDefault();
+                                  setDragStart({ x: e.clientX, y: e.clientY, px: bannerPosX, py: bannerPosY });
+                                }}
+                                onMouseMove={(e) => {
+                                  if (dragStart) {
+                                    const dx = e.clientX - dragStart.x;
+                                    const dy = e.clientY - dragStart.y;
+                                    const container = e.currentTarget.getBoundingClientRect();
+                                    const nx = Math.max(0, Math.min(100, dragStart.px - (dx / container.width) * 100));
+                                    const ny = Math.max(0, Math.min(100, dragStart.py - (dy / container.height) * 100));
+                                    setBannerPosX(nx);
+                                    setBannerPosY(ny);
+                                  }
+                                }}
+                                onMouseUp={() => {
+                                  if (dragStart) {
+                                    setDragStart(null);
+                                    updateServer(server.id, { 
+                                      settings: { 
+                                        ...server.settings, 
+                                        bannerPositionX: bannerPosX, 
+                                        bannerPositionY: bannerPosY 
+                                      } 
+                                    });
+                                  }
+                                }}
+                                onMouseLeave={() => {
+                                  if (dragStart) {
+                                    setDragStart(null);
+                                    updateServer(server.id, { 
+                                      settings: { 
+                                        ...server.settings, 
+                                        bannerPositionX: bannerPosX, 
+                                        bannerPositionY: bannerPosY 
+                                      } 
+                                    });
+                                  }
+                                }}
+                              >
+                                {server.bannerUrl ? (
+                                  <>
+                                    <img 
+                                      src={server.bannerUrl} 
+                                      alt="" 
+                                      className="absolute inset-0 w-full h-full object-cover filter blur-[1.5px] brightness-[0.6] pointer-events-none select-none" 
+                                      style={{
+                                        objectPosition: `${bannerPosX}% ${bannerPosY}%`,
+                                        transform: `scale(${bannerScale * 1.08})`,
+                                      }}
+                                    />
+                                    <div className="absolute inset-0 bg-gradient-to-l from-black/95 via-black/60 to-black/25 pointer-events-none z-0" />
+                                  </>
+                                ) : (
+                                  <div className="absolute inset-0 bg-[#5865f2]/5 pointer-events-none" />
+                                )}
+                                
+                                <div className="flex items-center gap-3 overflow-hidden relative z-10 w-full pointer-events-none select-none">
+                                  {server.iconUrl ? (
+                                    <img src={server.iconUrl} alt={server.name} className="w-7 h-7 rounded-lg object-cover shrink-0 border border-white/10" />
+                                  ) : (
+                                    <div className="w-7 h-7 rounded-lg bg-[#35373c] flex items-center justify-center shrink-0 border border-white/5">
+                                      <span className="text-xs font-bold text-[#dbdee1]">{server.name.substring(0, 1)}</span>
+                                    </div>
+                                  )}
+                                  <span className="font-semibold text-sm text-white truncate flex items-center gap-1.5">
+                                    {server.name}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Zoom Slider */}
+                            {server.bannerUrl && (
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between text-[10px] font-bold text-text-muted uppercase tracking-wider">
+                                  <span>Zoom (Scale)</span>
+                                  <span>{Math.round(bannerScale * 100)}%</span>
+                                </div>
+                                <input 
+                                  type="range"
+                                  min="1"
+                                  max="3"
+                                  step="0.05"
+                                  value={bannerScale}
+                                  onChange={(e) => {
+                                    setBannerScale(parseFloat(e.target.value));
+                                  }}
+                                  onMouseUp={(e) => {
+                                    const val = parseFloat((e.target as HTMLInputElement).value);
+                                    updateServer(server.id, { 
+                                      settings: { 
+                                        ...server.settings, 
+                                        bannerScale: val 
+                                      } 
+                                    });
+                                  }}
+                                  onTouchEnd={(e) => {
+                                    const val = parseFloat((e.target as HTMLInputElement).value);
+                                    updateServer(server.id, { 
+                                      settings: { 
+                                        ...server.settings, 
+                                        bannerScale: val 
+                                      } 
+                                    });
+                                  }}
+                                  className="w-full h-1.5 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-accent"
+                                />
+                              </div>
+                            )}
+
+                           <input
+                             type="file"
+                             accept="image/*"
+                             id="server-banner-upload"
+                             className="hidden"
+                             onChange={async (e) => {
+                               const file = e.target.files?.[0];
+                               if (file) {
+                                 const reader = new FileReader();
+                                 reader.onloadend = async () => {
+                                   if (typeof reader.result === 'string') {
+                                     try {
+                                       const uploadRes = await fetch('/api/upload', {
+                                         method: 'POST',
+                                         headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify({ fileData: reader.result, fileName: 'server_banner.png' })
+                                       });
+                                       if (uploadRes.ok) {
+                                         const uploadData = await uploadRes.json();
+                                         updateServer(server.id, { 
+                                           bannerUrl: uploadData.url,
+                                           settings: {
+                                             ...server.settings,
+                                             bannerPositionX: 50,
+                                             bannerPositionY: 50,
+                                             bannerScale: 1
+                                           }
+                                         });
+                                       }
+                                     } catch (err) {
+                                       console.error('Server banner upload failed:', err);
+                                     }
+                                   }
+                                 };
+                                 reader.readAsDataURL(file);
+                               }
+                             }}
+                           />
+                           <div className="flex items-center gap-2">
+                             <label 
+                               htmlFor="server-banner-upload"
+                               className="px-4 py-2 bg-surface-3 hover:bg-accent border border-border rounded-lg text-xs font-bold text-white cursor-pointer transition-all uppercase tracking-wider text-center"
+                             >
+                               Upload Banner
+                             </label>
+                             {server.bannerUrl && (
+                               <Button 
+                                 variant="secondary" 
+                                 size="sm"
+                                 onClick={() => updateServer(server.id, { bannerUrl: '' })}
+                                 className="text-danger hover:text-danger/80"
+                               >
+                                 Remove
+                               </Button>
+                             )}
+                           </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <label className="text-[10px] font-bold text-text-muted uppercase tracking-[0.2em] block">Accent Color</label>
+                      <div className="grid grid-cols-6 gap-3">
+                        {['#5865F2', '#3BA55D', '#FAA81A', '#ED4245', '#EB459E', '#9B59B6'].map(color => (
+                          <button 
+                            key={color}
+                            onClick={() => updateServerSettings(server.id, { accentColor: color })}
+                            className={cn(
+                              "h-10 w-10 rounded-full border-2 transition-transform hover:scale-110 shadow-md",
+                              server.settings?.accentColor === color ? "border-white" : "border-transparent"
+                            )}
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+                {!['overview', 'channels', 'members', 'roles', 'notifications', 'appearance', 'audit-log', 'insights', 'safety'].includes(activeTab) && (
+                  <div className="flex flex-col items-center justify-center py-20 text-center animate-fade-in-up">
+                    <div className="w-12 h-12 rounded bg-surface-2 border border-border flex items-center justify-center mb-6">
+                      <Settings size={24} className="text-text-muted" />
+                    </div>
+                    <h3 className="text-base font-bold text-white mb-2">Module Unavailable</h3>
+                    <p className="text-sm text-text-secondary max-w-xs mx-auto leading-relaxed">This administrative interface is currently under development for the upcoming stable release.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
+          {/* Create Invite Modal */}
+          <CreateInviteModal 
+            isOpen={isInviteModalOpen} 
+            onClose={() => setIsInviteModalOpen(false)} 
+            serverId={server.id} 
+          />
+          {/* Create Channel Modal */}
+          {createChannelCategory && (
+            <CreateChannelModal
+              isOpen={true}
+              onClose={() => setCreateChannelCategory(null)}
+              categoryId={createChannelCategory}
+            />
+          )}
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}

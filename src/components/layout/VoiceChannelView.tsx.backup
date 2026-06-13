@@ -1,0 +1,484 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { Mic, MicOff, Headphones, HeadphoneOff, PhoneOff, Volume2, Settings, MonitorUp, Signal, Video, VideoOff } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { Avatar } from '../ui/Avatar';
+import { Button } from '../ui/Button';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface VoiceChannelViewProps {
+  channelId: string;
+}
+
+export function VoiceChannelView({ channelId }: VoiceChannelViewProps) {
+  const { 
+    channels, users, voiceState, joinVoiceChannel, leaveVoiceChannel, 
+    toggleMute, toggleDeafen, setSettingsOpen, requestToSpeak, 
+    inviteToStage, moveToAudience, callState, toggleCallVideo
+  } = useAppStore();
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
+  const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
+  
+  // Quality options for screen share
+  const [screenShareResolution, setScreenShareResolution] = useState<'1080p' | '720p'>('1080p');
+  const [screenShareFps, setScreenShareFps] = useState<30 | 60>(30); // 30fps default
+  const [isQualityMenuOpen, setIsQualityMenuOpen] = useState(false);
+
+  const channel = channels.find(c => c.id === channelId);
+
+  if (!channel) return null;
+
+  const isConnected = voiceState.channelId === channelId;
+  const isStage = channel.isStage;
+  
+  const connectedUserList = isConnected ? voiceState.connectedUsers.map(id => users[id]).filter(Boolean) : [];
+  const speakers = isStage ? connectedUserList.filter(u => voiceState.stageSpeakers?.includes(u.id)) : connectedUserList;
+  const audience = isStage ? connectedUserList.filter(u => !voiceState.stageSpeakers?.includes(u.id)) : [];
+  const requests = isStage ? voiceState.stageRequests || [] : [];
+
+  const isUserSpeaker = voiceState.stageSpeakers?.includes('u1');
+  const hasRequested = voiceState.stageRequests?.includes('u1');
+
+  // Monitor webcam stream based on isConnected and callState.isVideoOff
+  useEffect(() => {
+    let activeStream: MediaStream | null = null;
+
+    const startWebcam = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720 },
+          audio: false
+        });
+        activeStream = stream;
+        setWebcamStream(stream);
+      } catch (e) {
+        console.error('Error starting webcam:', e);
+        if (!callState.isVideoOff) {
+          toggleCallVideo();
+        }
+      }
+    };
+
+    if (isConnected && !callState.isVideoOff) {
+      startWebcam();
+    } else {
+      if (webcamStream) {
+        webcamStream.getTracks().forEach(track => track.stop());
+        setWebcamStream(null);
+      }
+    }
+
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isConnected, callState.isVideoOff]);
+
+  // Handle screen share toggling
+  const handleToggleScreenShare = async () => {
+    if (isScreenSharing) {
+      if (screenShareStream) {
+        screenShareStream.getTracks().forEach(track => track.stop());
+        setScreenShareStream(null);
+      }
+      setIsScreenSharing(false);
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            width: { ideal: screenShareResolution === '1080p' ? 1920 : 1280 },
+            height: { ideal: screenShareResolution === '1080p' ? 1080 : 720 },
+            frameRate: { ideal: screenShareFps }
+          },
+          audio: false
+        });
+
+        // Detect stop sharing from browser bar
+        stream.getVideoTracks()[0].onended = () => {
+          setIsScreenSharing(false);
+          setScreenShareStream(null);
+        };
+
+        setScreenShareStream(stream);
+        setIsScreenSharing(true);
+      } catch (e) {
+        console.error('Error sharing screen:', e);
+        setIsScreenSharing(false);
+        setScreenShareStream(null);
+      }
+    }
+  };
+
+  // Clean up screen share stream if disconnected
+  useEffect(() => {
+    if (!isConnected) {
+      if (screenShareStream) {
+        screenShareStream.getTracks().forEach(track => track.stop());
+        setScreenShareStream(null);
+      }
+      setIsScreenSharing(false);
+    }
+  }, [isConnected]);
+
+  return (
+    <div className="flex-1 flex flex-col bg-black relative overflow-hidden">
+      {/* Main Content Area */}
+      <div className="relative z-10 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
+        {!isConnected ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-24 h-24 rounded-[32px] bg-[#2b2d31] flex items-center justify-center mb-6 shadow-xl border border-white/5">
+              {isStage ? <Mic size={40} className="text-[#dbdee1]" /> : <Volume2 size={40} className="text-[#dbdee1]" />}
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">{isStage ? 'Ready to join the stage?' : 'Voice Channel'}</h2>
+            <p className="text-text-secondary mb-8 max-w-sm text-sm">
+              {isStage 
+                ? "You'll join as an audience member. You can request to speak once you're inside."
+                : `Join ${channel.name} to talk with your team using high-fidelity audio.`}
+            </p>
+            <Button 
+              variant="primary" 
+              size="lg" 
+              onClick={() => joinVoiceChannel(channelId)} 
+              className="w-full max-w-[280px] bg-[#5865f2] hover:bg-[#4752c4] text-white font-medium"
+            >
+              {isStage ? 'Join as Audience' : 'Connect Voice'}
+            </Button>
+          </div>
+        ) : (
+          <div className="p-8 pb-32 space-y-12">
+            {/* Grid Area */}
+            <div className="max-w-6xl mx-auto w-full">
+              <div className={cn(
+                "grid gap-4",
+                (speakers.length + (screenShareStream ? 1 : 0)) === 1 ? "grid-cols-1 max-w-xl mx-auto" :
+                (speakers.length + (screenShareStream ? 1 : 0)) === 2 ? "grid-cols-2" :
+                (speakers.length + (screenShareStream ? 1 : 0)) <= 4 ? "grid-cols-2" :
+                "grid-cols-3 lg:grid-cols-4"
+              )}>
+                {speakers.map(user => {
+                  const conn = useAppStore.getState().voiceConnections?.[user.id];
+                  const isMe = user.id === 'u1';
+                  return (
+                    <SpeakerCard 
+                      key={user.id} 
+                      user={user} 
+                      isMe={isMe} 
+                      isMuted={conn?.isMuted || false}
+                      isSpeaking={!!conn?.isSpeaking && !conn?.isMuted}
+                      videoStream={isMe ? webcamStream : null}
+                    />
+                  );
+                })}
+
+                {/* Local Screen Share feed */}
+                {screenShareStream && (
+                  <SpeakerCard
+                    user={users['u1']}
+                    isMe={true}
+                    isMuted={false}
+                    isSpeaking={false}
+                    videoStream={screenShareStream}
+                    isScreenShare={true}
+                  />
+                )}
+              </div>
+            </div>
+
+            {/* Audience Section */}
+            {isStage && (
+              <div className="max-w-6xl mx-auto w-full">
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-6">
+                  {audience.map(user => (
+                    <div key={user.id} className="flex flex-col items-center gap-2 group relative">
+                      <div className="relative">
+                        <Avatar src={user.avatarUrl} alt={user.username} size="lg" className="ring-2 ring-transparent group-hover:ring-[#313338] transition-all" />
+                        {requests.includes(user.id) && (
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-[#5865f2] text-white rounded-full flex items-center justify-center border-2 border-[#1e1f22] shadow-lg">
+                            <Mic size={10} />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium text-text-secondary truncate w-full text-center group-hover:text-white transition-colors">{user.username}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Control Bar - Sleek & Classic */}
+      <AnimatePresence>
+        {isConnected && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30"
+          >
+            <div className="flex items-center gap-4 px-4 py-3 bg-[#2b2d31] rounded-full shadow-[0_8px_24px_rgba(0,0,0,0.5)] border border-white/5">
+              <div className="flex items-center gap-2 pr-4 border-r border-[#3f4147]">
+                <ControlBtn 
+                  icon={voiceState.isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                  active={voiceState.isMuted}
+                  danger={voiceState.isMuted}
+                  onClick={toggleMute}
+                  disabled={isStage && !isUserSpeaker}
+                  tooltip={voiceState.isMuted ? "Unmute" : "Mute"}
+                />
+                <ControlBtn 
+                  icon={voiceState.isDeafened ? <HeadphoneOff size={20} /> : <Headphones size={20} />}
+                  active={voiceState.isDeafened}
+                  danger={voiceState.isDeafened}
+                  onClick={toggleDeafen}
+                  tooltip={voiceState.isDeafened ? "Undeafen" : "Deafen"}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 pr-4 border-r border-[#3f4147] relative">
+                <ControlBtn 
+                  icon={callState?.isVideoOff === false ? <Video size={20} /> : <VideoOff size={20} />}
+                  active={callState?.isVideoOff === false}
+                  danger={callState?.isVideoOff === true}
+                  onClick={toggleCallVideo}
+                  tooltip={callState?.isVideoOff === false ? 'Turn Off Camera' : 'Turn On Camera'}
+                />
+                
+                <div className="relative flex items-center">
+                  <ControlBtn 
+                    icon={<MonitorUp size={20} />}
+                    active={isScreenSharing}
+                    onClick={handleToggleScreenShare}
+                    tooltip={isScreenSharing ? "Stop Sharing Screen" : "Share Screen"}
+                  />
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setIsQualityMenuOpen(!isQualityMenuOpen); }}
+                    className="absolute -top-1 -right-1 w-4 h-4 bg-[#1e1f22] text-[#dbdee1] rounded-full flex items-center justify-center border border-white/10 hover:bg-[#3f4147] transition-all text-[8px] font-bold cursor-pointer"
+                    title="Screen Share Settings"
+                  >
+                    ⚙️
+                  </button>
+                  {isQualityMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsQualityMenuOpen(false)} />
+                      <div className="absolute bottom-12 left-1/2 -translate-x-1/2 bg-[#1e1f22] border border-[#3f4147] rounded-lg p-3 shadow-2xl z-50 flex flex-col gap-2 w-44">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-text-muted">Resolution</div>
+                        <div className="flex gap-1.5">
+                          <button 
+                            onClick={() => { setScreenShareResolution('1080p'); setIsQualityMenuOpen(false); }}
+                            className={cn("flex-1 text-[11px] font-bold py-1 px-1.5 rounded transition-colors text-center cursor-pointer", screenShareResolution === '1080p' ? "bg-[#5865f2] text-white" : "bg-[#2b2d31] text-[#dbdee1] hover:bg-[#3f4147]")}
+                          >
+                            1080p
+                          </button>
+                          <button 
+                            onClick={() => { setScreenShareResolution('720p'); setIsQualityMenuOpen(false); }}
+                            className={cn("flex-1 text-[11px] font-bold py-1 px-1.5 rounded transition-colors text-center cursor-pointer", screenShareResolution === '720p' ? "bg-[#5865f2] text-white" : "bg-[#2b2d31] text-[#dbdee1] hover:bg-[#3f4147]")}
+                          >
+                            720p
+                          </button>
+                        </div>
+
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-text-muted mt-1">Frame Rate</div>
+                        <div className="flex gap-1.5">
+                          <button 
+                            onClick={() => { setScreenShareFps(30); setIsQualityMenuOpen(false); }}
+                            className={cn("flex-1 text-[11px] font-bold py-1 px-1.5 rounded transition-colors text-center cursor-pointer", screenShareFps === 30 ? "bg-[#5865f2] text-white" : "bg-[#2b2d31] text-[#dbdee1] hover:bg-[#3f4147]")}
+                          >
+                            30 FPS
+                          </button>
+                          <button 
+                            onClick={() => { setScreenShareFps(60); setIsQualityMenuOpen(false); }}
+                            className={cn("flex-1 text-[11px] font-bold py-1 px-1.5 rounded transition-colors text-center cursor-pointer", screenShareFps === 60 ? "bg-[#5865f2] text-white" : "bg-[#2b2d31] text-[#dbdee1] hover:bg-[#3f4147]")}
+                          >
+                            60 FPS
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <ControlBtn 
+                  icon={<Settings size={20} />}
+                  onClick={() => setSettingsOpen(true)}
+                  tooltip="User Settings"
+                />
+                {isStage && !isUserSpeaker && (
+                  <button 
+                    onClick={requestToSpeak}
+                    className={cn(
+                      "h-10 px-4 rounded-full flex items-center gap-2 transition-all font-bold text-[11px] uppercase tracking-widest",
+                      hasRequested ? "bg-[#5865f2] text-white" : "bg-[#3f4147] text-[#dbdee1] hover:bg-[#4e5058]"
+                    )}
+                  >
+                    <Mic size={16} />
+                    <span>{hasRequested ? 'Requested' : 'Request'}</span>
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={leaveVoiceChannel}
+                className="w-12 h-10 rounded-full bg-[#f23f43] hover:bg-[#d8373b] text-white flex items-center justify-center transition-all shadow-lg cursor-pointer"
+              >
+                <PhoneOff size={20} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+interface SpeakerCardProps {
+  user: any;
+  isMe: boolean;
+  isMuted: boolean;
+  isSpeaking: boolean;
+  videoStream?: MediaStream | null;
+  isScreenShare?: boolean;
+  key?: any;
+}
+
+function SpeakerCard({ user, isMe, isMuted, isSpeaking, videoStream, isScreenShare }: SpeakerCardProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && videoStream) {
+      videoRef.current.srcObject = videoStream;
+    }
+  }, [videoStream]);
+
+  return (
+    <motion.div 
+      layout
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className={cn(
+        "relative aspect-video bg-[#1e1f22] rounded-lg flex flex-col items-center justify-center overflow-hidden transition-all duration-100",
+        isSpeaking ? "ring-[3px] ring-[#23a55a] shadow-[0_0_15px_rgba(35,165,90,0.2)]" : "hover:bg-[#2b2d31]"
+      )}
+    >
+      {videoStream ? (
+        <video 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          muted={isMe} 
+          className="absolute inset-0 w-full h-full object-cover z-0"
+        />
+      ) : null}
+
+      {/* Overlay controls/indicators */}
+      <div className={cn("relative z-10 flex flex-col items-center justify-center gap-3 w-full h-full", videoStream && "absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent")}>
+        {!videoStream && (
+          <div className="relative">
+            <Avatar src={user.avatarUrl} alt={user.username} size="xl" className="shadow-lg" />
+            {isMuted && (
+              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-[#f23f43] rounded-full flex items-center justify-center border-[3px] border-[#2b2d31]">
+                <MicOff size={12} className="text-white" />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      
+      <div className="absolute bottom-3 left-3 flex items-center gap-2 z-20">
+        <span className="text-xs font-bold text-white bg-black/40 px-2 py-0.5 rounded backdrop-blur-md">
+          {isScreenShare ? `${isMe ? 'Your' : `${user.username}'s`} Screen` : (isMe ? 'You' : user.username)}
+        </span>
+      </div>
+
+      {isSpeaking && !isScreenShare && (
+        <div className="absolute top-3 left-3 z-20">
+          <div className="w-2 h-2 rounded-full bg-[#23a55a] animate-pulse" />
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function ControlBtn({ icon, active, danger, onClick, disabled, tooltip }: any) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "w-10 h-10 rounded-full flex items-center justify-center transition-all group relative cursor-pointer",
+        active 
+          ? (danger ? "bg-[#f23f43] text-white" : "bg-[#5865f2] text-white") 
+          : "bg-transparent text-[#dbdee1] hover:bg-[#3f4147] hover:text-white",
+        disabled && "opacity-20 cursor-not-allowed"
+      )}
+    >
+      {icon}
+      {/* Tooltip Simulation */}
+      <span className="absolute -top-10 scale-0 group-hover:scale-100 transition-all bg-black text-white text-[10px] px-2 py-1 rounded font-bold whitespace-nowrap z-50">
+        {tooltip}
+      </span>
+    </button>
+  );
+}
+
+// Compact voice status bar shown at bottom of sidebar when connected
+export function VoiceStatusBar() {
+  const { voiceState, channels, toggleMute, toggleDeafen, leaveVoiceChannel } = useAppStore();
+  const channel = channels.find(c => c.id === voiceState.channelId);
+
+  return (
+    <AnimatePresence>
+      {voiceState.channelId && channel && (
+        <motion.div 
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: 'auto', opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+          className="overflow-hidden"
+        >
+          <div className="p-2 pt-3 border-b border-[#3f4147] bg-[#232428] flex flex-col gap-2">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex flex-col min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <Signal size={12} className="text-[#23a55a]" />
+                  <span className="text-[11px] font-bold text-[#23a55a] uppercase tracking-wide">Voice Connected</span>
+                </div>
+                <span className="text-[13px] text-white font-medium truncate">{channel.name}</span>
+              </div>
+              <button 
+                onClick={leaveVoiceChannel}
+                className="p-1.5 text-[#dbdee1] hover:text-[#f23f43] hover:bg-white/5 rounded-md transition-all cursor-pointer"
+              >
+                <PhoneOff size={16} />
+              </button>
+            </div>
+
+            <div className="flex gap-1">
+              <button 
+                onClick={toggleMute} 
+                className={cn(
+                  "flex-1 h-8 rounded flex items-center justify-center transition-colors cursor-pointer", 
+                  voiceState.isMuted ? "bg-[#f23f43] text-white" : "hover:bg-[#3f4147] text-[#dbdee1]"
+                )}
+              >
+                {voiceState.isMuted ? <MicOff size={16} /> : <Mic size={16} />}
+              </button>
+              <button 
+                onClick={toggleDeafen} 
+                className={cn(
+                  "flex-1 h-8 rounded flex items-center justify-center transition-colors cursor-pointer", 
+                  voiceState.isDeafened ? "bg-[#f23f43] text-white" : "hover:bg-[#3f4147] text-[#dbdee1]"
+                )}
+              >
+                {voiceState.isDeafened ? <HeadphoneOff size={16} /> : <Headphones size={16} />}
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

@@ -1,0 +1,226 @@
+import { StateCreator } from 'zustand';
+import { AppState } from '../useAppStore';
+import { MOCK_MESSAGES, currentUser } from '../../lib/mockData';
+import { Message, DmChannel } from '../../types';
+import { extractLinks, fetchLinkPreview, LinkPreview } from '../../lib/linkUtils';
+
+export interface ChatSlice {
+  messages: Message[];
+  pinnedMessageIds: string[];
+  editingMessageId: string | null;
+  replyingToMessageId: string | null;
+  drafts: Record<string, string>;
+  dmChannels: Record<string, DmChannel>;
+
+  createGroupDm: (participantIds: string[]) => string | null;
+  leaveGroupDm: (dmId: string) => void;
+  renameGroupDm: (dmId: string, name: string) => void;
+  addParticipantsToGroup: (dmId: string, participantIds: string[]) => void;
+  removeParticipantFromGroup: (dmId: string, userId: string) => void;
+
+  addMessage: (content: string, channelId: string, attachments?: Message['attachments'], replyToId?: string, poll?: Message['poll']) => Promise<void>;
+  deleteMessage: (messageId: string) => void;
+  editMessage: (messageId: string, newContent: string) => void;
+  toggleReaction: (messageId: string, emoji: string) => void;
+  togglePinMessage: (messageId: string) => void;
+  voteInPoll: (messageId: string, optionId: string) => void;
+  setDraft: (id: string, content: string) => void;
+  setEditingMessageId: (id: string | null) => void;
+  setReplyingToMessageId: (id: string | null) => void;
+}
+
+export const createChatSlice: StateCreator<AppState, [], [], ChatSlice> = (set) => ({
+  messages: MOCK_MESSAGES,
+  pinnedMessageIds: [],
+  editingMessageId: null,
+  replyingToMessageId: null,
+  drafts: {},
+  dmChannels: {},
+
+  createGroupDm: (participantIds) => {
+    // Limit to 10 users total (9 + current user)
+    const allParticipants = Array.from(new Set([currentUser.id, ...participantIds]));
+    if (allParticipants.length > 10) return null;
+
+    const newDm: DmChannel = {
+      id: `dm-${Date.now()}`,
+      participants: allParticipants,
+      ownerId: currentUser.id,
+      createdAt: new Date().toISOString()
+    };
+    
+    set((state) => ({ dmChannels: { ...state.dmChannels, [newDm.id]: newDm } }));
+    return newDm.id;
+  },
+
+  leaveGroupDm: (dmId) => set((state) => {
+    const dm = state.dmChannels[dmId];
+    if (!dm) return state;
+    
+    const newParticipants = dm.participants.filter(id => id !== currentUser.id);
+    if (newParticipants.length === 0) {
+      const newDms = { ...state.dmChannels };
+      delete newDms[dmId];
+      return { dmChannels: newDms };
+    }
+    return { dmChannels: { ...state.dmChannels, [dmId]: { ...dm, participants: newParticipants } } };
+  }),
+
+  renameGroupDm: (dmId, name) => set((state) => ({
+    dmChannels: {
+      ...state.dmChannels,
+      [dmId]: state.dmChannels[dmId] ? { ...state.dmChannels[dmId], name } : state.dmChannels[dmId]
+    }
+  })),
+
+  addParticipantsToGroup: (dmId, participantIds) => {
+    set((state) => {
+      const dm = state.dmChannels[dmId];
+      if (!dm) return state;
+      const allParticipants = Array.from(new Set([...dm.participants, ...participantIds]));
+      if (allParticipants.length > 10) return state;
+      return {
+        dmChannels: {
+          ...state.dmChannels,
+          [dmId]: { ...dm, participants: allParticipants }
+        }
+      };
+    });
+  },
+
+  removeParticipantFromGroup: (dmId, userId) => {
+    set((state) => {
+      const dm = state.dmChannels[dmId];
+      if (!dm) return state;
+      return {
+        dmChannels: {
+          ...state.dmChannels,
+          [dmId]: {
+            ...dm,
+            participants: dm.participants.filter(id => id !== userId)
+          }
+        }
+      };
+    });
+  },
+
+  addMessage: async (content, channelId, attachments, replyToId, poll) => {
+    const newMessage: Message = {
+      id: Math.random().toString(36).substr(2, 9),
+      channelId,
+      userId: currentUser.id,
+      content,
+      timestamp: new Date().toISOString(),
+      attachments,
+      replyToId,
+      poll,
+      reactions: []
+    };
+    const links = extractLinks(content);
+    
+    set((state) => ({
+      messages: [...state.messages, newMessage]
+    }));
+
+    if (links.length > 0) {
+      const previews = await Promise.all(links.map(l => fetchLinkPreview(l)));
+      const filteredPreviews = previews.filter((p): p is LinkPreview => p !== null);
+      
+      if (filteredPreviews.length > 0) {
+        set((state) => ({
+          messages: state.messages.map(m =>
+            m.id === newMessage.id ? { ...m, linkPreviews: filteredPreviews } : m
+          )
+        }));
+      }
+    }
+  },
+
+  deleteMessage: (messageId) => set((state) => ({
+    messages: state.messages.filter(m => m.id !== messageId)
+  })),
+
+  editMessage: (messageId, newContent) => set((state) => ({
+    messages: state.messages.map(m =>
+      m.id === messageId ? { ...m, content: newContent, editedAt: new Date().toISOString() } : m
+    ),
+    editingMessageId: null,
+  })),
+
+  toggleReaction: (messageId, emoji) => set((state) => ({
+    messages: state.messages.map(m => {
+      if (m.id !== messageId) return m;
+      const reactions = m.reactions ? [...m.reactions] : [];
+      const existing = reactions.find(r => r.emoji === emoji);
+      if (existing) {
+        if (existing.userIds.includes(currentUser.id)) {
+          existing.userIds = existing.userIds.filter(id => id !== currentUser.id);
+          existing.count--;
+          if (existing.count <= 0) return { ...m, reactions: reactions.filter(r => r.emoji !== emoji) };
+          return { ...m, reactions };
+        } else {
+          existing.userIds.push(currentUser.id);
+          existing.count++;
+          return { ...m, reactions };
+        }
+      } else {
+        reactions.push({ emoji, count: 1, userIds: [currentUser.id] });
+        return { ...m, reactions };
+      }
+    })
+  })),
+
+  togglePinMessage: (messageId) => set((state) => ({
+    messages: state.messages.map(m =>
+      m.id === messageId ? { ...m, pinned: !m.pinned } : m
+    ),
+  })),
+
+  voteInPoll: (messageId, optionId) => set((state) => ({
+    messages: state.messages.map(msg => {
+      if (msg.id !== messageId || !msg.poll) return msg;
+      
+      const newOptions = msg.poll.options.map(opt => {
+        const isSelected = opt.id === optionId;
+        const wasAlreadyVoted = opt.voterIds.includes(currentUser.id);
+        
+        if (isSelected) {
+          if (wasAlreadyVoted) {
+            // Remove vote
+            return {
+              ...opt,
+              voteCount: opt.voteCount - 1,
+              voterIds: opt.voterIds.filter(id => id !== currentUser.id)
+            };
+          } else {
+            // Add vote
+            return {
+              ...opt,
+              voteCount: opt.voteCount + 1,
+              voterIds: [...opt.voterIds, currentUser.id]
+            };
+          }
+        } else if (!msg.poll?.allowMultiple) {
+          // If single choice, remove user's vote from other options
+          if (opt.voterIds.includes(currentUser.id)) {
+            return {
+              ...opt,
+              voteCount: opt.voteCount - 1,
+              voterIds: opt.voterIds.filter(id => id !== currentUser.id)
+            };
+          }
+        }
+        return opt;
+      });
+
+      return { ...msg, poll: { ...msg.poll, options: newOptions } };
+    })
+  })),
+
+  setDraft: (id, content) => set((state) => ({
+    drafts: { ...state.drafts, [id]: content }
+  })),
+
+  setEditingMessageId: (id) => set({ editingMessageId: id }),
+  setReplyingToMessageId: (id) => set({ replyingToMessageId: id }),
+});

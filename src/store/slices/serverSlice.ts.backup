@@ -1,0 +1,438 @@
+import { StateCreator } from 'zustand';
+import { AppState } from '../useAppStore';
+import { MOCK_SERVERS, MOCK_CATEGORIES, MOCK_CHANNELS, MOCK_THREADS, currentUser } from '../../lib/mockData';
+import { Server, Category, Channel, Folder, Role, ChannelType, AuditLogAction, AuditLog, ServerInvite, Thread, Webhook } from '../../types';
+
+export interface ServerSlice {
+  servers: Server[];
+  categories: Category[];
+  channels: Channel[];
+  threads: Thread[];
+  webhooks: Webhook[];
+  folders: Folder[];
+  invites: Record<string, ServerInvite>;
+
+  createInvite: (serverId: string, config: Partial<ServerInvite>) => string;
+  deleteInvite: (code: string) => void;
+  joinServerWithInvite: (code: string) => boolean;
+
+  setFolders: (folders: Folder[]) => void;
+  addFolder: (name: string, color?: string) => void;
+  deleteFolder: (folderId: string) => void;
+  updateFolder: (folderId: string, updates: Partial<Folder>) => void;
+  moveServerToFolder: (serverId: string, folderId: string | null) => void;
+  addServer: (name: string, template?: 'gaming' | 'school') => void;
+  updateServer: (serverId: string, updates: Partial<Server>) => void;
+  deleteServer: (serverId: string) => void;
+  updateMemberRole: (serverId: string, userId: string, roleIds: string[]) => void;
+  addServerRole: (serverId: string, role: Role) => void;
+  updateServerRole: (serverId: string, roleId: string, role: Partial<Role>) => void;
+  deleteServerRole: (serverId: string, roleId: string) => void;
+  updateServerSettings: (serverId: string, settings: Partial<NonNullable<Server['settings']>>) => void;
+  addChannel: (serverId: string, categoryId: string, name: string, type: ChannelType, isStage?: boolean) => void;
+  updateChannel: (channelId: string, updates: Partial<Channel>) => void;
+  deleteChannel: (channelId: string) => void;
+  addCategory: (serverId: string, name: string) => void;
+  updateCategory: (categoryId: string, updates: Partial<Category>) => void;
+  deleteCategory: (categoryId: string) => void;
+  reorderServers: (serverIds: string[]) => void;
+  reorderCategories: (serverId: string, categoryIds: string[]) => void;
+  reorderChannels: (categoryId: string, channelIds: string[]) => void;
+  moveChannelToCategory: (channelId: string, newCategoryId: string) => void;
+  addAuditLog: (serverId: string, action: AuditLogAction, targetId?: string, targetName?: string, changes?: AuditLog['changes']) => void;
+  kickMember: (serverId: string, userId: string) => void;
+  banMember: (serverId: string, userId: string) => void;
+  transferOwnership: (serverId: string, newOwnerId: string) => void;
+  joinServer: (serverId: string) => void;
+  getPermissions: (serverId: string, userId: string) => string[];
+  
+  toggleArchiveThread: (threadId: string) => void;
+  togglePrivateThread: (threadId: string) => void;
+
+  createWebhook: (serverId: string, channelId: string, name: string) => void;
+  deleteWebhook: (webhookId: string) => void;
+}
+
+export const createServerSlice: StateCreator<AppState, [], [], ServerSlice> = (set, get) => ({
+  servers: MOCK_SERVERS,
+  categories: MOCK_CATEGORIES,
+  channels: MOCK_CHANNELS,
+  threads: MOCK_THREADS,
+  webhooks: [],
+  folders: [],
+  invites: {},
+
+  createInvite: (serverId, config) => {
+    const code = Math.random().toString(36).substring(2, 10);
+    const invite: ServerInvite = {
+      code,
+      serverId,
+      inviterId: currentUser.id,
+      createdAt: new Date().toISOString(),
+      uses: 0,
+      maxUses: config.maxUses || 0,
+      expiresAt: config.expiresAt
+    };
+    set((state) => ({ invites: { ...state.invites, [code]: invite } }));
+    return code;
+  },
+
+  deleteInvite: (code) => set((state) => {
+    const newInvites = { ...state.invites };
+    delete newInvites[code];
+    return { invites: newInvites };
+  }),
+
+  joinServerWithInvite: (code) => {
+    const state = get();
+    const invite = state.invites[code];
+    if (!invite) return false;
+    if (invite.maxUses && invite.uses >= invite.maxUses) return false;
+    if (invite.expiresAt && new Date(invite.expiresAt) < new Date()) return false;
+
+    const updatedInvite = { ...invite, uses: invite.uses + 1 };
+    const server = state.servers.find(s => s.id === invite.serverId);
+    if (!server) return false;
+    if (server.members.includes(currentUser.id)) {
+      set((s) => ({ invites: { ...s.invites, [code]: updatedInvite } }));
+      return true; // Already a member — treat as success
+    }
+
+    set((s) => ({
+      servers: s.servers.map(sv =>
+        sv.id === invite.serverId
+          ? { ...sv, members: [...sv.members, currentUser.id] }
+          : sv
+      ),
+      invites: { ...s.invites, [code]: updatedInvite },
+    }));
+    return true;
+  },
+
+  setFolders: (folders) => set({ folders }),
+  addFolder: (name, color) => set((state) => ({
+    folders: [...state.folders, { id: `f_${Date.now()}`, name, color: color || '#5865f2', serverIds: [] }]
+  })),
+  deleteFolder: (folderId) => set((state) => ({
+    folders: state.folders.filter(f => f.id !== folderId)
+  })),
+  updateFolder: (folderId, updates) => set((state) => ({
+    folders: state.folders.map(f => f.id === folderId ? { ...f, ...updates } : f)
+  })),
+  moveServerToFolder: (serverId, folderId) => set((state) => {
+    const cleanFolders = state.folders.map(f => ({
+      ...f,
+      serverIds: f.serverIds.filter(id => id !== serverId)
+    }));
+    if (!folderId) return { folders: cleanFolders };
+    return {
+      folders: cleanFolders.map(f => 
+        f.id === folderId 
+          ? { ...f, serverIds: [...f.serverIds, serverId] } 
+          : f
+      )
+    };
+  }),
+
+  addServer: (name, template) => set((state) => {
+    const newServerId = `s${Date.now()}`;
+    const defaultRoles: Role[] = [
+      { id: 'r1', name: 'Admin', color: '#ed4245', permissions: ['ADMIN', 'MENTION_EVERYONE'], hoist: true },
+      { id: 'r2', name: 'Moderator', color: '#3498db', permissions: ['MANAGE_MESSAGES', 'KICK_MEMBERS', 'MENTION_EVERYONE'], hoist: true },
+      { id: 'r3', name: 'Member', color: '#99aab5', permissions: [], hoist: false },
+    ];
+
+    const newServer: Server = { 
+      id: newServerId, 
+      name, 
+      ownerId: currentUser.id, 
+      members: [currentUser.id],
+      roles: defaultRoles,
+      memberRoles: { [currentUser.id]: ['r1'] },
+      auditLogs: [{ id: `log_${Date.now()}`, action: 'SERVER_UPDATE', executorId: currentUser.id, targetName: name, timestamp: new Date().toISOString() }],
+      insights: { totalMessages: 0, activeMembers: 1, growthRate: 0 }
+    };
+
+    let newCategories: Category[] = [];
+    let newChannels: Channel[] = [];
+
+    if (template === 'gaming') {
+      const c1 = `c_g_cat_${Date.now()}_1`;
+      const c2 = `c_g_cat_${Date.now()}_2`;
+      newCategories = [
+        { id: c1, serverId: newServerId, name: 'Information', order: 0 },
+        { id: c2, serverId: newServerId, name: 'Voice Channels', order: 1 }
+      ];
+      newChannels = [
+        { id: `c_${Date.now()}_1`, serverId: newServerId, categoryId: c1, name: 'rules', type: 'announcement' },
+        { id: `c_${Date.now()}_2`, serverId: newServerId, categoryId: c1, name: 'general', type: 'text' },
+        { id: `c_${Date.now()}_3`, serverId: newServerId, categoryId: c2, name: 'Lobby', type: 'voice' },
+        { id: `c_${Date.now()}_4`, serverId: newServerId, categoryId: c2, name: 'Gaming 1', type: 'voice' }
+      ];
+    } else if (template === 'school') {
+      const c1 = `c_s_cat_${Date.now()}_1`;
+      const c2 = `c_s_cat_${Date.now()}_2`;
+      newCategories = [
+        { id: c1, serverId: newServerId, name: 'Information', order: 0 },
+        { id: c2, serverId: newServerId, name: 'Classes', order: 1 }
+      ];
+      newChannels = [
+        { id: `c_${Date.now()}_1`, serverId: newServerId, categoryId: c1, name: 'announcements', type: 'announcement' },
+        { id: `c_${Date.now()}_2`, serverId: newServerId, categoryId: c1, name: 'general', type: 'text' },
+        { id: `c_${Date.now()}_3`, serverId: newServerId, categoryId: c2, name: 'study-room', type: 'text' },
+        { id: `c_${Date.now()}_4`, serverId: newServerId, categoryId: c2, name: 'Study Voice', type: 'voice' }
+      ];
+    } else {
+      const defaultCatId = `c_cat_${Date.now()}`;
+      newCategories = [{ id: defaultCatId, serverId: newServerId, name: 'General', order: 0 }];
+      newChannels = [{ id: `c_${Date.now()}`, serverId: newServerId, categoryId: defaultCatId, name: 'general', type: 'text' }];
+    }
+
+    return {
+      servers: [...state.servers, newServer],
+      categories: [...state.categories, ...newCategories],
+      channels: [...state.channels, ...newChannels],
+      activeServerId: newServerId,
+      activeChannelId: newChannels.find(c => c.type === 'text' || c.type === 'announcement')?.id || newChannels[0].id,
+      activeDmId: null
+    };
+  }),
+
+  updateServer: (serverId, updates) => set((state) => ({
+    servers: state.servers.map(s => s.id === serverId ? { ...s, ...updates } : s)
+  })),
+
+  deleteServer: (serverId) => set((state) => {
+    const remainingServers = state.servers.filter(s => s.id !== serverId);
+    const nextActiveId = remainingServers.length > 0 ? remainingServers[0].id : null;
+    return {
+      servers: remainingServers,
+      activeServerId: state.activeServerId === serverId ? nextActiveId : state.activeServerId,
+      channels: state.channels.filter(c => c.serverId !== serverId),
+      categories: state.categories.filter(c => c.serverId !== serverId),
+    };
+  }),
+
+  updateServerSettings: (serverId, settings) => set((state) => ({
+    servers: state.servers.map(s => s.id === serverId ? { ...s, settings: { ...s.settings, ...settings } } : s)
+  })),
+
+  updateMemberRole: (serverId, userId, roleIds) => {
+    const state = get();
+    const server = state.servers.find(s => s.id === serverId);
+    const user = state.users[userId];
+    const oldRoles = server?.memberRoles?.[userId] || [];
+
+    set((state) => ({
+      servers: state.servers.map(s => 
+        s.id === serverId 
+          ? { ...s, memberRoles: { ...s.memberRoles, [userId]: roleIds } } 
+          : s
+      )
+    }));
+
+    get().addAuditLog(serverId, 'MEMBER_ROLE_UPDATE', userId, user?.username, [
+      { field: 'roles', old: oldRoles, new: roleIds }
+    ]);
+  },
+
+  addServerRole: (serverId, role) => {
+    set((state) => ({
+      servers: state.servers.map(s => 
+        s.id === serverId 
+          ? { ...s, roles: [...(s.roles || []), role] } 
+          : s
+      )
+    }));
+    get().addAuditLog(serverId, 'ROLE_CREATE', role.id, role.name);
+  },
+
+  updateServerRole: (serverId, roleId, role) => {
+    set((state) => ({
+      servers: state.servers.map(s => 
+        s.id === serverId 
+          ? { ...s, roles: (s.roles || []).map(r => r.id === roleId ? { ...r, ...role } : r) } 
+          : s
+      )
+    }));
+    get().addAuditLog(serverId, 'ROLE_UPDATE', roleId, role.name);
+  },
+
+  deleteServerRole: (serverId, roleId) => {
+    const roleName = get().servers.find(s => s.id === serverId)?.roles.find(r => r.id === roleId)?.name;
+    set((state) => ({
+      servers: state.servers.map(s => 
+        s.id === serverId 
+          ? { ...s, roles: (s.roles || []).filter(r => r.id !== roleId) } 
+          : s
+      )
+    }));
+    get().addAuditLog(serverId, 'ROLE_DELETE', roleId, roleName);
+  },
+
+  addChannel: (serverId, categoryId, name, type, isStage) => {
+    const newId = `ch_${Date.now()}`;
+    set((state) => ({
+      channels: [...state.channels, { 
+        id: newId, 
+        serverId, 
+        categoryId, 
+        name, 
+        type: (isStage ? 'voice' : type) as ChannelType, // Stage is a voice channel with isStage flag
+        isStage: isStage || false 
+      }]
+    }));
+    get().addAuditLog(serverId, 'CHANNEL_CREATE', newId, name);
+  },
+
+  updateChannel: (channelId, updates) => {
+    const channel = get().channels.find(c => c.id === channelId);
+    set((state) => ({
+      channels: state.channels.map(c => c.id === channelId ? { ...c, ...updates } : c)
+    }));
+    if (channel) get().addAuditLog(channel.serverId, 'CHANNEL_UPDATE', channelId, updates.name || channel.name);
+  },
+
+  deleteChannel: (channelId) => {
+    const channel = get().channels.find(c => c.id === channelId);
+    set((state) => ({
+      channels: state.channels.filter(c => c.id !== channelId)
+    }));
+    if (channel) get().addAuditLog(channel.serverId, 'CHANNEL_DELETE', channelId, channel.name);
+  },
+
+  addCategory: (serverId, name) => set((state) => ({
+    categories: [...state.categories, { id: `cat_${Date.now()}`, serverId, name, order: state.categories.length }]
+  })),
+
+  updateCategory: (categoryId, updates) => set((state) => ({
+    categories: state.categories.map(c => c.id === categoryId ? { ...c, ...updates } : c)
+  })),
+
+  deleteCategory: (categoryId) => set((state) => ({
+    categories: state.categories.filter(c => c.id !== categoryId),
+    channels: state.channels.filter(c => c.categoryId !== categoryId) // Cascade delete channels or handle differently based on business logic. Here we cascade.
+  })),
+
+  reorderServers: (serverIds) => set((state) => {
+    const serversMap = new Map(state.servers.map(s => [s.id, s]));
+    const newServers = serverIds.map(id => serversMap.get(id)).filter(Boolean) as Server[];
+    // Append any servers not in the list (e.g., missed during drag)
+    const existingSet = new Set(serverIds);
+    const remaining = state.servers.filter(s => !existingSet.has(s.id));
+    return { servers: [...newServers, ...remaining] };
+  }),
+
+  reorderCategories: (serverId, categoryIds) => set((state) => {
+    return {
+      categories: state.categories.map(c => {
+        if (c.serverId !== serverId) return c;
+        const newOrder = categoryIds.indexOf(c.id);
+        return newOrder !== -1 ? { ...c, order: newOrder } : c;
+      })
+    };
+  }),
+
+  reorderChannels: (categoryId, channelIds) => set((state) => {
+    return {
+      channels: state.channels.map(c => {
+        if (c.categoryId !== categoryId) return c;
+        const newOrder = channelIds.indexOf(c.id);
+        return newOrder !== -1 ? { ...c, order: newOrder } : c;
+      })
+    };
+  }),
+
+  moveChannelToCategory: (channelId, newCategoryId) => set((state) => ({
+    channels: state.channels.map(c => c.id === channelId ? { ...c, categoryId: newCategoryId } : c)
+  })),
+
+  addAuditLog: (serverId, action, targetId, targetName, changes) => set((state) => ({
+    servers: state.servers.map(s => 
+      s.id === serverId 
+        ? { 
+            ...s, 
+            auditLogs: [
+              { id: `log_${Date.now()}`, action, executorId: 'u1', targetId, targetName, changes, timestamp: new Date().toISOString() },
+              ...(s.auditLogs || [])
+            ].slice(0, 50) 
+          } 
+        : s
+    )
+  })),
+
+  kickMember: (serverId, userId) => set((state) => ({
+    servers: state.servers.map(s => 
+      s.id === serverId 
+        ? { ...s, members: s.members.filter(id => id !== userId) } 
+        : s
+    )
+  })),
+
+  banMember: (serverId, userId) => set((state) => ({
+    servers: state.servers.map(s => 
+      s.id === serverId 
+        ? { ...s, members: s.members.filter(id => id !== userId) } 
+        : s
+    )
+  })),
+
+  transferOwnership: (serverId, newOwnerId) => set((state) => ({
+    servers: state.servers.map(s => 
+      s.id === serverId ? { ...s, ownerId: newOwnerId } : s
+    )
+  })),
+
+  joinServer: (serverId) => set((state) => {
+    const server = state.servers.find(s => s.id === serverId);
+    if (!server || server.members.includes(currentUser.id)) return state;
+    return {
+      servers: state.servers.map(s => 
+        s.id === serverId ? { ...s, members: [...s.members, currentUser.id] } : s
+      )
+    };
+  }),
+
+  getPermissions: (serverId, userId) => {
+    const server = get().servers.find(s => s.id === serverId);
+    if (!server) return [];
+    if (server.ownerId === userId) return ['ADMIN', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES'];
+    
+    const userRolesIds = server.memberRoles[userId] || [];
+    const userRoles = server.roles.filter(r => userRolesIds.includes(r.id));
+    
+    const perms = new Set<string>();
+    userRoles.forEach(r => {
+      if (r.permissions.includes('ADMIN')) {
+        ['ADMIN', 'MANAGE_SERVER', 'MANAGE_CHANNELS', 'MANAGE_ROLES', 'KICK_MEMBERS', 'BAN_MEMBERS', 'MENTION_EVERYONE', 'MANAGE_MESSAGES'].forEach(p => perms.add(p));
+      } else {
+        r.permissions.forEach(p => perms.add(p));
+      }
+    });
+    
+    return Array.from(perms);
+  },
+
+  toggleArchiveThread: (threadId) => set((state) => ({
+    threads: state.threads.map(t => t.id === threadId ? { ...t, isArchived: !t.isArchived } : t)
+  })),
+
+  togglePrivateThread: (threadId) => set((state) => ({
+    threads: state.threads.map(t => t.id === threadId ? { ...t, isPrivate: !t.isPrivate } : t)
+  })),
+
+  createWebhook: (serverId, channelId, name) => set((state) => ({
+    webhooks: [...state.webhooks, {
+      id: `wh_${Date.now()}`,
+      name,
+      serverId,
+      channelId,
+      token: Math.random().toString(36).substr(2, 16),
+      createdBy: currentUser.id
+    }]
+  })),
+
+  deleteWebhook: (webhookId) => set((state) => ({
+    webhooks: state.webhooks.filter(w => w.id !== webhookId)
+  })),
+});

@@ -1,0 +1,794 @@
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { exec, spawn } from 'child_process';
+import { MOCK_SERVERS, MOCK_CATEGORIES, MOCK_CHANNELS, MOCK_THREADS, MOCK_MESSAGES, MOCK_USERS, currentUser } from './src/lib/mockData';
+import { Server, Category, Channel, Thread, Message, User, DmChannel, Notification, Role, ChannelType } from './src/types';
+
+const app = express();
+const port = 3001;
+const DB_FILE = path.resolve('db.json');
+
+app.use(express.json());
+
+// Initialize Database
+interface DB {
+  servers: Server[];
+  categories: Category[];
+  channels: Channel[];
+  threads: Thread[];
+  messages: Message[];
+  users: Record<string, User>;
+  dmChannels: Record<string, DmChannel>;
+  notifications: Notification[];
+  currentUser: User;
+}
+
+function loadDB(): DB {
+  if (fs.existsSync(DB_FILE)) {
+    try {
+      const data = fs.readFileSync(DB_FILE, 'utf-8');
+      return JSON.parse(data);
+    } catch (e) {
+      console.error('Error reading DB, fallback to mock data', e);
+    }
+  }
+
+  const db: DB = {
+    servers: MOCK_SERVERS,
+    categories: MOCK_CATEGORIES,
+    channels: MOCK_CHANNELS,
+    threads: MOCK_THREADS,
+    messages: MOCK_MESSAGES,
+    users: MOCK_USERS,
+    dmChannels: {},
+    notifications: [],
+    currentUser: currentUser,
+  };
+  saveDB(db);
+  return db;
+}
+
+function saveDB(db: DB) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf-8');
+}
+
+// Session-aware helper to get the active user for the request
+function getCurrentUser(req: express.Request, db: DB): User {
+  const userId = req.headers['session-user-id'] || 'u1';
+  return db.users[userId as string] || db.users['u1'];
+}
+
+interface VoiceConnection {
+  userId: string;
+  channelId: string;
+  isMuted: boolean;
+  isDeafened: boolean;
+  isSpeaking: boolean;
+}
+let voiceConnections: Record<string, VoiceConnection> = {};
+
+// Bootstrap API
+app.get('/api/bootstrap', (req, res) => {
+  const db = loadDB();
+  res.json({
+    servers: db.servers,
+    categories: db.categories,
+    channels: db.channels,
+    threads: db.threads,
+    messages: db.messages,
+    users: Object.values(db.users),
+    dmChannels: db.dmChannels,
+    notifications: db.notifications,
+    currentUser: getCurrentUser(req, db),
+    voiceConnections: Object.values(voiceConnections),
+  });
+});
+
+
+
+// Voice Connection Simulation
+let simulationInterval: NodeJS.Timeout | null = null;
+
+function startVoiceSimulation(channelId: string) {
+  if (simulationInterval) clearInterval(simulationInterval);
+  
+  let step = 0;
+  simulationInterval = setInterval(() => {
+    step++;
+    
+    // SarahDesign joins after 3 seconds
+    if (step === 1) {
+      voiceConnections['u2'] = {
+        userId: 'u2',
+        channelId,
+        isMuted: false,
+        isDeafened: false,
+        isSpeaking: false
+      };
+    }
+    // MikeG joins after 6 seconds (starts muted)
+    else if (step === 2) {
+      voiceConnections['u3'] = {
+        userId: 'u3',
+        channelId,
+        isMuted: true,
+        isDeafened: false,
+        isSpeaking: false
+      };
+    }
+    // Random status changes & speaking simulations
+    else {
+      const rand = Math.random();
+      if (rand < 0.35) {
+        if (voiceConnections['u2']) {
+          voiceConnections['u2'].isSpeaking = !voiceConnections['u2'].isSpeaking;
+        }
+      } else if (rand < 0.55) {
+        if (voiceConnections['u3']) {
+          voiceConnections['u3'].isMuted = !voiceConnections['u3'].isMuted;
+          if (voiceConnections['u3'].isMuted) {
+            voiceConnections['u3'].isSpeaking = false;
+          }
+        }
+      } else if (rand < 0.75) {
+        if (voiceConnections['u3'] && !voiceConnections['u3'].isMuted) {
+          voiceConnections['u3'].isSpeaking = !voiceConnections['u3'].isSpeaking;
+        }
+      } else if (rand < 0.90) {
+        // EmmaW joins or toggles speaking
+        if (!voiceConnections['u4']) {
+          voiceConnections['u4'] = {
+            userId: 'u4',
+            channelId,
+            isMuted: false,
+            isDeafened: false,
+            isSpeaking: false
+          };
+        } else {
+          voiceConnections['u4'].isSpeaking = !voiceConnections['u4'].isSpeaking;
+        }
+      }
+    }
+  }, 2500);
+}
+
+function stopVoiceSimulation() {
+  if (simulationInterval) {
+    clearInterval(simulationInterval);
+    simulationInterval = null;
+  }
+  delete voiceConnections['u2'];
+  delete voiceConnections['u3'];
+  delete voiceConnections['u4'];
+}
+
+// Voice Connection Endpoints
+app.post('/api/voice/join', (req, res) => {
+  const { userId, channelId } = req.body;
+  if (!userId || !channelId) return res.status(400).json({ error: 'Missing parameters' });
+  
+  voiceConnections[userId] = {
+    userId,
+    channelId,
+    isMuted: voiceConnections[userId]?.isMuted || false,
+    isDeafened: voiceConnections[userId]?.isDeafened || false,
+    isSpeaking: false
+  };
+
+  if (userId === 'u1') {
+    startVoiceSimulation(channelId);
+  }
+
+  res.json(voiceConnections[userId]);
+});
+
+app.post('/api/voice/leave', (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
+  
+  delete voiceConnections[userId];
+
+  if (userId === 'u1') {
+    stopVoiceSimulation();
+  }
+
+  res.json({ success: true });
+});
+
+app.post('/api/voice/state', (req, res) => {
+  const { userId, isMuted, isDeafened, isSpeaking } = req.body;
+  if (!userId) return res.status(400).json({ error: 'Missing userId' });
+  
+  if (voiceConnections[userId]) {
+    if (isMuted !== undefined) voiceConnections[userId].isMuted = isMuted;
+    if (isDeafened !== undefined) voiceConnections[userId].isDeafened = isDeafened;
+    if (isSpeaking !== undefined) voiceConnections[userId].isSpeaking = isSpeaking;
+    res.json(voiceConnections[userId]);
+  } else {
+    res.status(404).json({ error: 'User not in voice channel' });
+  }
+});
+
+// Update current user profile / status
+app.put('/api/users/status', (req, res) => {
+  const { status, customStatus, bio, location, pronouns, username, email, avatarUrl } = req.body;
+  const db = loadDB();
+  const user = getCurrentUser(req, db);
+
+  const updatedUser = {
+    ...user,
+    status: status || user.status,
+    customStatus: customStatus !== undefined ? customStatus : user.customStatus,
+    bio: bio !== undefined ? bio : user.bio,
+    location: location !== undefined ? location : user.location,
+    pronouns: pronouns !== undefined ? pronouns : user.pronouns,
+    username: username !== undefined ? username : user.username,
+    email: email !== undefined ? email : user.email,
+    avatarUrl: avatarUrl !== undefined ? avatarUrl : user.avatarUrl,
+  };
+
+  db.users[user.id] = updatedUser;
+  saveDB(db);
+  res.json(updatedUser);
+});
+
+// Login Endpoint
+app.post('/api/login', (req, res) => {
+  const { emailOrUsername, password } = req.body;
+  if (!emailOrUsername) {
+    return res.status(400).json({ error: 'Email or Username is required' });
+  }
+
+  const db = loadDB();
+
+  const matchedUser = Object.values(db.users).find(u => {
+    const usernameMatch = u.username.toLowerCase() === emailOrUsername.toLowerCase();
+    const emailMatch = u.email && u.email.toLowerCase() === emailOrUsername.toLowerCase();
+    
+    const simulatedEmail = `${u.username.toLowerCase()}@nexus.com`;
+    const simulatedDotEmail = `${u.username.toLowerCase().replace(/([a-z])([A-Z])/g, '$1.$2')}@nexus.com`;
+    const isSimulatedEmailMatch = simulatedEmail === emailOrUsername.toLowerCase() || simulatedDotEmail === emailOrUsername.toLowerCase();
+
+    return usernameMatch || emailMatch || isSimulatedEmailMatch;
+  });
+
+  if (!matchedUser) {
+    return res.status(401).json({ error: 'User not found. Try AlexTheDev, SarahDesign, MikeG, or EmmaW.' });
+  }
+
+  res.json({ success: true, user: matchedUser });
+});
+
+// Create Server
+app.post('/api/servers', (req, res) => {
+  const { name, template } = req.body;
+  const db = loadDB();
+  const user = getCurrentUser(req, db);
+
+  const newServerId = `s${Date.now()}`;
+  const defaultRoles: Role[] = [
+    { id: 'r1', name: 'Admin', color: '#ed4245', permissions: ['ADMIN', 'MENTION_EVERYONE'], hoist: true },
+    { id: 'r2', name: 'Moderator', color: '#3498db', permissions: ['MANAGE_MESSAGES', 'KICK_MEMBERS', 'MENTION_EVERYONE'], hoist: true },
+    { id: 'r3', name: 'Member', color: '#99aab5', permissions: [], hoist: false },
+  ];
+
+  const newServer: Server = {
+    id: newServerId,
+    name,
+    ownerId: user.id,
+    members: [user.id],
+    roles: defaultRoles,
+    memberRoles: { [user.id]: ['r1'] },
+    auditLogs: [{
+      id: `log_${Date.now()}`,
+      action: 'SERVER_UPDATE',
+      executorId: user.id,
+      targetName: name,
+      timestamp: new Date().toISOString()
+    }],
+    insights: { totalMessages: 0, activeMembers: 1, growthRate: 0 }
+  };
+
+  let newCategories: Category[] = [];
+  let newChannels: Channel[] = [];
+
+  if (template === 'gaming') {
+    const c1 = `c_g_cat_${Date.now()}_1`;
+    const c2 = `c_g_cat_${Date.now()}_2`;
+    const c3 = `c_g_cat_${Date.now()}_3`;
+    newCategories = [
+      { id: c1, serverId: newServerId, name: 'Information', order: 0 },
+      { id: c2, serverId: newServerId, name: 'Text Channels', order: 1 },
+      { id: c3, serverId: newServerId, name: 'Voice Channels', order: 2 }
+    ];
+    newChannels = [
+      { id: `c_${Date.now()}_1`, serverId: newServerId, categoryId: c1, name: 'welcome-rules', type: 'announcement', description: 'Welcome and rules for the server', order: 0 },
+      { id: `c_${Date.now()}_2`, serverId: newServerId, categoryId: c1, name: 'announcements', type: 'announcement', description: 'Important gaming news & events', order: 1 },
+      { id: `c_${Date.now()}_3`, serverId: newServerId, categoryId: c1, name: 'patches-and-updates', type: 'text', description: 'Game patch notes and official releases', order: 2 },
+      { id: `c_${Date.now()}_4`, serverId: newServerId, categoryId: c2, name: 'general', type: 'text', description: 'General gaming discussion', order: 0 },
+      { id: `c_${Date.now()}_5`, serverId: newServerId, categoryId: c2, name: 'clips-and-highlights', type: 'text', description: 'Share your best gameplay moments!', order: 1 },
+      { id: `c_${Date.now()}_6`, serverId: newServerId, categoryId: c2, name: 'looking-for-group', type: 'text', description: 'Find teammates and queue up', order: 2 },
+      { id: `c_${Date.now()}_7`, serverId: newServerId, categoryId: c2, name: 'strategy-talk', type: 'text', description: 'Tips, build guides, and team tactics', order: 3 },
+      { id: `c_${Date.now()}_8`, serverId: newServerId, categoryId: c3, name: 'Lobby', type: 'voice', order: 0 },
+      { id: `c_${Date.now()}_9`, serverId: newServerId, categoryId: c3, name: 'Duo Queue', type: 'voice', order: 1 },
+      { id: `c_${Date.now()}_10`, serverId: newServerId, categoryId: c3, name: 'Squad up 1', type: 'voice', order: 2 },
+      { id: `c_${Date.now()}_11`, serverId: newServerId, categoryId: c3, name: 'Squad up 2', type: 'voice', order: 3 },
+      { id: `c_${Date.now()}_12`, serverId: newServerId, categoryId: c3, name: 'AFK Room', type: 'voice', order: 4 }
+    ];
+  } else if (template === 'school') {
+    const c1 = `c_s_cat_${Date.now()}_1`;
+    const c2 = `c_s_cat_${Date.now()}_2`;
+    const c3 = `c_s_cat_${Date.now()}_3`;
+    newCategories = [
+      { id: c1, serverId: newServerId, name: 'Information', order: 0 },
+      { id: c2, serverId: newServerId, name: 'Study Rooms', order: 1 },
+      { id: c3, serverId: newServerId, name: 'Voice Lounges', order: 2 }
+    ];
+    newChannels = [
+      { id: `c_${Date.now()}_1`, serverId: newServerId, categoryId: c1, name: 'welcome-syllabus', type: 'announcement', description: 'Welcome info and rules', order: 0 },
+      { id: `c_${Date.now()}_2`, serverId: newServerId, categoryId: c1, name: 'announcements', type: 'announcement', description: 'Important class/school notifications', order: 1 },
+      { id: `c_${Date.now()}_3`, serverId: newServerId, categoryId: c1, name: 'class-schedule', type: 'text', description: 'Timetables, office hours, schedules', order: 2 },
+      { id: `c_${Date.now()}_4`, serverId: newServerId, categoryId: c2, name: 'general-study', type: 'text', description: 'General coursework help and chats', order: 0 },
+      { id: `c_${Date.now()}_5`, serverId: newServerId, categoryId: c2, name: 'homework-help', type: 'text', description: 'Stuck on a problem? Ask here!', order: 1 },
+      { id: `c_${Date.now()}_6`, serverId: newServerId, categoryId: c2, name: 'exam-prep', type: 'text', description: 'Study guides, flashcards, test prep', order: 2 },
+      { id: `c_${Date.now()}_7`, serverId: newServerId, categoryId: c2, name: 'resources-share', type: 'text', description: 'Link sharing, docs, notes', order: 3 },
+      { id: `c_${Date.now()}_8`, serverId: newServerId, categoryId: c3, name: 'Quiet Study Space', type: 'voice', order: 0 },
+      { id: `c_${Date.now()}_9`, serverId: newServerId, categoryId: c3, name: 'Group Sync 1', type: 'voice', order: 1 },
+      { id: `c_${Date.now()}_10`, serverId: newServerId, categoryId: c3, name: 'Group Sync 2', type: 'voice', order: 2 },
+      { id: `c_${Date.now()}_11`, serverId: newServerId, categoryId: c3, name: 'Ask a Teacher', type: 'voice', order: 3 }
+    ];
+  } else {
+    const c1 = `c_default_cat_${Date.now()}_1`;
+    const c2 = `c_default_cat_${Date.now()}_2`;
+    const c3 = `c_default_cat_${Date.now()}_3`;
+    newCategories = [
+      { id: c1, serverId: newServerId, name: 'Information', order: 0 },
+      { id: c2, serverId: newServerId, name: 'Text Channels', order: 1 },
+      { id: c3, serverId: newServerId, name: 'Voice Channels', order: 2 }
+    ];
+    newChannels = [
+      { id: `c_${Date.now()}_1`, serverId: newServerId, categoryId: c1, name: 'welcome', type: 'announcement', description: 'Welcome to our new server!', order: 0 },
+      { id: `c_${Date.now()}_2`, serverId: newServerId, categoryId: c1, name: 'announcements', type: 'announcement', description: 'Important updates and bulletins', order: 1 },
+      { id: `c_${Date.now()}_3`, serverId: newServerId, categoryId: c2, name: 'general', type: 'text', description: 'General chat and discussion', order: 0 },
+      { id: `c_${Date.now()}_4`, serverId: newServerId, categoryId: c2, name: 'random', type: 'text', description: 'Anything goes!', order: 1 },
+      { id: `c_${Date.now()}_5`, serverId: newServerId, categoryId: c3, name: 'General Voice', type: 'voice', order: 0 },
+      { id: `c_${Date.now()}_6`, serverId: newServerId, categoryId: c3, name: 'Lounge', type: 'voice', order: 1 }
+    ];
+  }
+
+  db.servers.push(newServer);
+  db.categories.push(...newCategories);
+  db.channels.push(...newChannels);
+
+  saveDB(db);
+  res.json({ server: newServer, categories: newCategories, channels: newChannels });
+});
+
+// Update Server Settings
+app.put('/api/servers/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      const settings = s.settings || { notifications: 'all' };
+      return {
+        ...s,
+        ...updates,
+        settings: updates.settings ? { ...settings, ...updates.settings } : settings
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Delete Server
+app.delete('/api/servers/:id', (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+
+  db.servers = db.servers.filter(s => s.id !== id);
+  db.channels = db.channels.filter(c => c.serverId !== id);
+  db.categories = db.categories.filter(c => c.serverId !== id);
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Update Server Member Roles
+app.put('/api/servers/:id/members/:userId/roles', (req, res) => {
+  const { id, userId } = req.params;
+  const { roleIds } = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      const memberRoles = s.memberRoles || {};
+      return {
+        ...s,
+        memberRoles: {
+          ...memberRoles,
+          [userId]: roleIds
+        }
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Server Roles CRUD
+app.post('/api/servers/:id/roles', (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      return {
+        ...s,
+        roles: [...(s.roles || []), role]
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.put('/api/servers/:id/roles/:roleId', (req, res) => {
+  const { id, roleId } = req.params;
+  const { role } = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      return {
+        ...s,
+        roles: (s.roles || []).map(r => r.id === roleId ? { ...r, ...role } : r)
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/servers/:id/roles/:roleId', (req, res) => {
+  const { id, roleId } = req.params;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      return {
+        ...s,
+        roles: (s.roles || []).filter(r => r.id !== roleId)
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Channel endpoints
+app.post('/api/channels', (req, res) => {
+  const { serverId, categoryId, name, type, isStage } = req.body;
+  const db = loadDB();
+
+  const newId = `ch_${Date.now()}`;
+  const newChannel: Channel = {
+    id: newId,
+    serverId,
+    categoryId,
+    name,
+    type: (isStage ? 'voice' : type) as ChannelType,
+    isStage: isStage || false
+  };
+
+  db.channels.push(newChannel);
+  saveDB(db);
+  res.json(newChannel);
+});
+
+app.put('/api/channels/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const db = loadDB();
+
+  db.channels = db.channels.map(c => c.id === id ? { ...c, ...updates } : c);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/channels/:id', (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+
+  db.channels = db.channels.filter(c => c.id !== id);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Categories CRUD
+app.post('/api/categories', (req, res) => {
+  const { serverId, name } = req.body;
+  const db = loadDB();
+
+  const newCat: Category = {
+    id: `cat_${Date.now()}`,
+    serverId,
+    name,
+    order: db.categories.length
+  };
+
+  db.categories.push(newCat);
+  saveDB(db);
+  res.json(newCat);
+});
+
+app.put('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const db = loadDB();
+
+  db.categories = db.categories.map(c => c.id === id ? { ...c, ...updates } : c);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/categories/:id', (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+
+  db.categories = db.categories.filter(c => c.id !== id);
+  db.channels = db.channels.filter(c => c.categoryId !== id);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Messages endpoints
+app.post('/api/messages', (req, res) => {
+  const { content, channelId, attachments, replyToId, poll } = req.body;
+  const db = loadDB();
+
+  const newMessage: Message = {
+    id: Math.random().toString(36).substr(2, 9),
+    channelId,
+    userId: db.currentUser.id,
+    content,
+    timestamp: new Date().toISOString(),
+    attachments,
+    replyToId,
+    poll,
+    reactions: []
+  };
+
+  db.messages.push(newMessage);
+  saveDB(db);
+
+  res.json(newMessage);
+});
+
+app.put('/api/messages/:id', (req, res) => {
+  const { id } = req.params;
+  const { content } = req.body;
+  const db = loadDB();
+
+  db.messages = db.messages.map(m =>
+    m.id === id ? { ...m, content, editedAt: new Date().toISOString() } : m
+  );
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/messages/:id', (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+
+  db.messages = db.messages.filter(m => m.id !== id);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Message reaction toggling
+app.post('/api/messages/:id/reactions', (req, res) => {
+  const { id } = req.params;
+  const { emoji } = req.body;
+  const db = loadDB();
+
+  db.messages = db.messages.map(m => {
+    if (m.id !== id) return m;
+    const reactions = m.reactions ? [...m.reactions] : [];
+    const existing = reactions.find(r => r.emoji === emoji);
+    if (existing) {
+      if (existing.userIds.includes(db.currentUser.id)) {
+        existing.userIds = existing.userIds.filter(uid => uid !== db.currentUser.id);
+        existing.count--;
+        if (existing.count <= 0) return { ...m, reactions: reactions.filter(r => r.emoji !== emoji) };
+        return { ...m, reactions };
+      } else {
+        existing.userIds.push(db.currentUser.id);
+        existing.count++;
+        return { ...m, reactions };
+      }
+    } else {
+      reactions.push({ emoji, count: 1, userIds: [db.currentUser.id] });
+      return { ...m, reactions };
+    }
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Message pin
+app.post('/api/messages/:id/pin', (req, res) => {
+  const { id } = req.params;
+  const db = loadDB();
+
+  db.messages = db.messages.map(m =>
+    m.id === id ? { ...m, pinned: !m.pinned } : m
+  );
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Poll voting
+app.post('/api/messages/:id/vote', (req, res) => {
+  const { id } = req.params;
+  const { optionId } = req.body;
+  const db = loadDB();
+
+  db.messages = db.messages.map(msg => {
+    if (msg.id !== id || !msg.poll) return msg;
+
+    const newOptions = msg.poll.options.map(opt => {
+      const isSelected = opt.id === optionId;
+      const wasAlreadyVoted = opt.voterIds.includes(db.currentUser.id);
+
+      if (isSelected) {
+        if (wasAlreadyVoted) {
+          return {
+            ...opt,
+            voteCount: opt.voteCount - 1,
+            voterIds: opt.voterIds.filter(uid => uid !== db.currentUser.id)
+          };
+        } else {
+          return {
+            ...opt,
+            voteCount: opt.voteCount + 1,
+            voterIds: [...opt.voterIds, db.currentUser.id]
+          };
+        }
+      } else if (!msg.poll?.allowMultiple) {
+        if (opt.voterIds.includes(db.currentUser.id)) {
+          return {
+            ...opt,
+            voteCount: opt.voteCount - 1,
+            voterIds: opt.voterIds.filter(uid => uid !== db.currentUser.id)
+          };
+        }
+      }
+      return opt;
+    });
+
+    return { ...msg, poll: { ...msg.poll, options: newOptions } };
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Group DM endpoints
+app.post('/api/dm-channels', (req, res) => {
+  const { participantIds } = req.body;
+  const db = loadDB();
+
+  const allParticipants = Array.from(new Set([db.currentUser.id, ...participantIds]));
+  if (allParticipants.length > 10) return res.status(400).json({ error: 'Too many participants' });
+
+  const newDm: DmChannel = {
+    id: `dm-${Date.now()}`,
+    participants: allParticipants,
+    ownerId: db.currentUser.id,
+    createdAt: new Date().toISOString()
+  };
+
+  db.dmChannels[newDm.id] = newDm;
+  saveDB(db);
+  res.json(newDm);
+});
+
+// Notifications read-all
+app.post('/api/notifications/read-all', (req, res) => {
+  const db = loadDB();
+  db.notifications = db.notifications.map(n => ({ ...n, read: true }));
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Threads endpoints
+app.post('/api/threads', (req, res) => {
+  const { channelId, name, isPrivate } = req.body;
+  const db = loadDB();
+
+  const newThread: Thread = {
+    id: `t_${Date.now()}`,
+    channelId,
+    name,
+    ownerId: db.currentUser.id,
+    createdAt: new Date().toISOString(),
+    messageCount: 0,
+    isArchived: false,
+    isPrivate: isPrivate || false
+  };
+
+  db.threads.push(newThread);
+  saveDB(db);
+  res.json(newThread);
+});
+
+app.put('/api/threads/:id', (req, res) => {
+  const { id } = req.params;
+  const updates = req.body;
+  const db = loadDB();
+
+  db.threads = db.threads.map(t => t.id === id ? { ...t, ...updates } : t);
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Kick Member Endpoint
+app.post('/api/servers/:id/kick', (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      return {
+        ...s,
+        members: s.members.filter(m => m !== userId)
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+// Ban Member Endpoint
+app.post('/api/servers/:id/ban', (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.body;
+  const db = loadDB();
+
+  db.servers = db.servers.map(s => {
+    if (s.id === id) {
+      return {
+        ...s,
+        members: s.members.filter(m => m !== userId)
+      };
+    }
+    return s;
+  });
+
+  saveDB(db);
+  res.json({ success: true });
+});
+
+app.listen(port, () => {
+  console.log(`BRAND app Express backend listening at http://localhost:${port}`);
+});

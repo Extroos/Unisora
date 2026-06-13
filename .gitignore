@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+dist-server/
+dist-electron/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+db.json
+dev.db
+dev.db-journal
+*.jpg
+*.png
+*.webp
+*.tmp

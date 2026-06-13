@@ -1,0 +1,137 @@
+import { StateCreator } from 'zustand';
+import { AppState } from '../useAppStore';
+import { currentUser as mockCurrentUser, MOCK_USERS } from '../../lib/mockData';
+import { User } from '../../types';
+
+export interface AuthSlice {
+  users: Record<string, User>;
+  currentUser: User;
+  isLoggedIn: boolean;
+  setLoggedIn: (isLoggedIn: boolean) => void;
+  login: (emailOrUsername: string) => Promise<{ success: boolean; error?: string }>;
+  updateCurrentUser: (updates: Partial<User>) => void;
+  setUserStatus: (status: 'online' | 'idle' | 'dnd' | 'offline') => void;
+  setCustomStatus: (text: string) => void;
+}
+
+const getInitialAuth = () => {
+  const userId = typeof window !== 'undefined' ? localStorage.getItem('session_user_id') : null;
+  const user = userId && MOCK_USERS[userId] ? MOCK_USERS[userId] : mockCurrentUser;
+  return {
+    currentUser: user,
+    users: { [user.id]: user },
+    isLoggedIn: userId !== null
+  };
+};
+
+const initialAuth = getInitialAuth();
+
+export const createAuthSlice: StateCreator<AppState, [], [], AuthSlice> = (set) => ({
+  users: initialAuth.users,
+  currentUser: initialAuth.currentUser,
+  isLoggedIn: initialAuth.isLoggedIn,
+
+  setLoggedIn: (isLoggedIn) => set({ isLoggedIn }),
+  login: async (emailOrUsername) => {
+    const fallbackLogin = () => {
+      const matchedUser = Object.values(MOCK_USERS).find(u => {
+        const usernameMatch = u.username.toLowerCase() === emailOrUsername.toLowerCase();
+        const emailMatch = u.email && u.email.toLowerCase() === emailOrUsername.toLowerCase();
+        
+        const simulatedEmail = `${u.username.toLowerCase()}@nexus.com`;
+        const simulatedDotEmail = `${u.username.toLowerCase().replace(/([a-z])([A-Z])/g, '$1.$2')}@nexus.com`;
+        const isSimulatedEmailMatch = simulatedEmail === emailOrUsername.toLowerCase() || simulatedDotEmail === emailOrUsername.toLowerCase();
+
+        return usernameMatch || emailMatch || isSimulatedEmailMatch;
+      });
+
+      if (matchedUser) {
+        localStorage.setItem('session_user_id', matchedUser.id);
+        set((state) => ({
+          isLoggedIn: true,
+          currentUser: matchedUser,
+          users: { ...state.users, [matchedUser.id]: matchedUser }
+        }));
+        return { success: true };
+      }
+      return { success: false, error: 'User not found. Try AlexTheDev, SarahDesign, MikeG, or EmmaW.' };
+    };
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailOrUsername }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('session_user_id', data.user.id);
+        set((state) => ({
+          isLoggedIn: true,
+          currentUser: data.user,
+          users: { ...state.users, [data.user.id]: data.user }
+        }));
+        return { success: true };
+      } else {
+        return fallbackLogin();
+      }
+    } catch (e) {
+      console.error(e);
+      return fallbackLogin();
+    }
+  },
+  updateCurrentUser: async (updates) => {
+    try {
+      const res = await fetch('/api/users/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set((state) => ({
+          users: { ...state.users, [data.id]: data },
+          currentUser: data
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  },
+  setUserStatus: async (status) => {
+    try {
+      const res = await fetch('/api/users/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set((state) => ({
+          users: { ...state.users, [data.id]: data },
+          currentUser: data
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  },
+  setCustomStatus: async (text) => {
+    try {
+      const res = await fetch('/api/users/status', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customStatus: text }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set((state) => ({
+          users: { ...state.users, [data.id]: data },
+          currentUser: data
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  },
+});

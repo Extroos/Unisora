@@ -1,0 +1,70 @@
+import { StateCreator } from 'zustand';
+import { AppState } from '../useAppStore';
+import { Notification } from '../../types';
+
+export interface NotificationSlice {
+  notifications: Notification[];
+  pendingFriends: string[];
+  incomingRequests: string[];
+  friends: string[];
+  blockedUsers: string[];
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  removeNotification: (id: string) => void;
+  sendFriendRequest: (userId: string) => void;
+  cancelFriendRequest: (userId: string) => void;
+  acceptFriendRequest: (userId: string) => void;
+  rejectFriendRequest: (userId: string) => void;
+  removeFriend: (userId: string) => void;
+  blockUser: (userId: string) => void;
+  unblockUser: (userId: string) => void;
+}
+
+export const createNotificationSlice: StateCreator<AppState, [], [], NotificationSlice> = (set) => ({
+  notifications: [
+    { id: 'n1', type: 'mention', username: 'SarahDesign', avatarUrl: 'https://i.pravatar.cc/150?u=u2', content: 'Hey @AlexTheDev, can you review the new component?', channel: 'frontend', channelId: 'c1', serverId: 's1', time: '2m ago', read: false },
+    { id: 'n2', type: 'reply', username: 'MikeG', avatarUrl: 'https://i.pravatar.cc/150?u=u3', content: 'Agreed. The performance looks great now.', channel: 'general', channelId: 'c2', serverId: 's1', time: '15m ago', read: false },
+    { id: 'n3', type: 'message', username: 'EmmaW', avatarUrl: 'https://i.pravatar.cc/150?u=u4', content: 'Check out this article about React 19', channel: 'random', channelId: 'c3', serverId: 's1', time: '1h ago', read: true },
+    { id: 'n4', type: 'mention', username: 'NexusBot', avatarUrl: 'https://i.pravatar.cc/150?u=u5', content: 'Build completed successfully. Deploy ready.', channel: 'announcements', channelId: 'c4', serverId: 's2', time: '3h ago', read: true },
+  ],
+  pendingFriends: ['EmmaW'],
+  incomingRequests: ['MikeG'],
+  friends: ['u2', 'u3'],
+  blockedUsers: [],
+
+  markNotificationRead: (id) => set((state) => ({
+    notifications: state.notifications.map(n => n.id === id ? { ...n, read: true } : n)
+  })),
+  markAllNotificationsRead: () => set((state) => ({
+    notifications: state.notifications.map(n => ({ ...n, read: true }))
+  })),
+  removeNotification: (id) => set((state) => ({
+    notifications: state.notifications.filter(n => n.id !== id)
+  })),
+  sendFriendRequest: (username) => set((state) => {
+    if (!state.pendingFriends.includes(username)) {
+      return { pendingFriends: [...state.pendingFriends, username] };
+    }
+    return state;
+  }),
+  cancelFriendRequest: (username) => set((state) => ({
+    pendingFriends: state.pendingFriends.filter(pf => pf !== username)
+  })),
+  acceptFriendRequest: (userId) => set((state) => ({
+    incomingRequests: state.incomingRequests.filter(id => id !== userId),
+    friends: state.friends.includes(userId) ? state.friends : [...state.friends, userId],
+  })),
+  rejectFriendRequest: (userId) => set((state) => ({
+    incomingRequests: state.incomingRequests.filter(id => id !== userId),
+  })),
+  removeFriend: (userId) => set((state) => ({
+    friends: state.friends.filter(id => id !== userId)
+  })),
+  blockUser: (userId) => set((state) => ({
+    blockedUsers: [...state.blockedUsers, userId],
+    friends: state.friends.filter(id => id !== userId)
+  })),
+  unblockUser: (userId) => set((state) => ({
+    blockedUsers: state.blockedUsers.filter(id => id !== userId),
+  })),
+});

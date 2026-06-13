@@ -1,0 +1,275 @@
+import React, { useState, useEffect } from 'react';
+import { useAppStore } from '../../store/useAppStore';
+import { Mic, Volume2 } from 'lucide-react';
+import { cn } from '../../lib/utils';
+import { Avatar } from '../ui/Avatar';
+import { Button } from '../ui/Button';
+import { motion, AnimatePresence } from 'motion/react';
+import { SpeakerCard } from './SpeakerCard';
+import { VoiceControlBar } from './VoiceControlBar';
+import { ScreenShareView } from '../screenshare/ScreenShareView';
+import { ShareScreenModal } from '../modals/ShareScreenModal';
+
+interface VoiceChannelViewProps {
+  channelId: string;
+}
+
+export function VoiceChannelView({ channelId }: VoiceChannelViewProps) {
+  const { 
+    channels, users, voiceState, joinVoiceChannel, leaveVoiceChannel, 
+    toggleMute, toggleDeafen, setSettingsOpen, requestToSpeak, 
+    inviteToStage, moveToAudience, callState, toggleCallVideo
+  } = useAppStore();
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [webcamStream, setWebcamStream] = useState<MediaStream | null>(null);
+  const [screenShareStream, setScreenShareStream] = useState<MediaStream | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+
+  const channel = channels.find(c => c.id === channelId);
+
+  if (!channel) return null;
+
+  const isConnected = voiceState.channelId === channelId;
+  const isStage = channel.isStage;
+  
+  const connectedUserList = isConnected ? voiceState.connectedUsers.map(id => users[id]).filter(Boolean) : [];
+  const speakers = isStage ? connectedUserList.filter(u => voiceState.stageSpeakers?.includes(u.id)) : connectedUserList;
+  const audience = isStage ? connectedUserList.filter(u => !voiceState.stageSpeakers?.includes(u.id)) : [];
+  const requests = isStage ? voiceState.stageRequests || [] : [];
+
+  const isUserSpeaker = voiceState.stageSpeakers?.includes('u1');
+  const hasRequested = voiceState.stageRequests?.includes('u1');
+
+  // Webcam stream effect
+  useEffect(() => {
+    let activeStream: MediaStream | null = null;
+
+    const startWebcam = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720 },
+          audio: false
+        });
+        activeStream = stream;
+        setWebcamStream(stream);
+      } catch (e) {
+        console.error('Error starting webcam:', e);
+        if (!callState.isVideoOff) {
+          toggleCallVideo();
+        }
+      }
+    };
+
+    if (isConnected && !callState.isVideoOff) {
+      startWebcam();
+    } else {
+      if (webcamStream) {
+        webcamStream.getTracks().forEach(track => track.stop());
+        setWebcamStream(null);
+      }
+    }
+
+    return () => {
+      if (activeStream) {
+        activeStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isConnected, callState.isVideoOff]);
+
+  // Screen share toggler - Opens Modal
+  const handleToggleScreenShare = () => {
+    if (isScreenSharing) {
+      if (screenShareStream) {
+        screenShareStream.getTracks().forEach(track => track.stop());
+        setScreenShareStream(null);
+      }
+      setIsScreenSharing(false);
+    } else {
+      setIsShareModalOpen(true);
+    }
+  };
+
+  // Perform actual display media capture using constraints selected in modal
+  const handleStartShare = async (settings: { resolution: '1080p' | '720p'; fps: 30 | 60; shareAudio: boolean }) => {
+    setIsShareModalOpen(false);
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: {
+          width: { ideal: settings.resolution === '1080p' ? 1920 : 1280 },
+          height: { ideal: settings.resolution === '1080p' ? 1080 : 720 },
+          frameRate: { ideal: settings.fps }
+        },
+        audio: settings.shareAudio
+      });
+
+      stream.getVideoTracks()[0].onended = () => {
+        setIsScreenSharing(false);
+        setScreenShareStream(null);
+      };
+
+      setScreenShareStream(stream);
+      setIsScreenSharing(true);
+    } catch (e) {
+      console.error('Error starting screenshare from modal:', e);
+      setIsScreenSharing(false);
+      setScreenShareStream(null);
+    }
+  };
+
+  // Cleanup screen sharing on disconnect
+  useEffect(() => {
+    if (!isConnected) {
+      if (screenShareStream) {
+        screenShareStream.getTracks().forEach(track => track.stop());
+        setScreenShareStream(null);
+      }
+      setIsScreenSharing(false);
+    }
+  }, [isConnected]);
+
+  return (
+    <div className="flex-1 flex flex-col bg-black relative overflow-hidden h-full">
+      {/* Main Content Area */}
+      <div className="relative z-10 flex-1 flex flex-col overflow-y-auto custom-scrollbar p-6">
+        {!isConnected ? (
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+            <div className="w-24 h-24 rounded-[32px] bg-[#2b2d31] flex items-center justify-center mb-6 shadow-xl border border-white/5">
+              {isStage ? <Mic size={40} className="text-[#dbdee1]" /> : <Volume2 size={40} className="text-[#dbdee1]" />}
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">{isStage ? 'Ready to join the stage?' : 'Voice Channel'}</h2>
+            <p className="text-text-secondary mb-8 max-w-sm text-sm">
+              {isStage 
+                ? "You'll join as an audience member. You can request to speak once you're inside."
+                : `Join ${channel.name} to talk with your team using high-fidelity audio.`}
+            </p>
+            <Button 
+              variant="primary" 
+              size="lg" 
+              onClick={() => joinVoiceChannel(channelId)} 
+              className="w-full max-w-[280px] bg-[#5865f2] hover:bg-[#4752c4] text-white font-medium"
+            >
+              {isStage ? 'Join as Audience' : 'Connect Voice'}
+            </Button>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col gap-6 h-full justify-between pb-24">
+            {screenShareStream ? (
+              // Focus Mode (Screenshare centered, speakers in a strip below)
+              <div className="flex-1 flex flex-col gap-4 min-h-0">
+                <ScreenShareView 
+                  stream={screenShareStream} 
+                  username={users['u1']?.username || 'You'} 
+                  isMe={true} 
+                />
+                
+                {/* Horizontal Strip of Speakers */}
+                <div className="flex gap-4 overflow-x-auto py-2 px-1 scrollbar-thin scrollbar-thumb-surface-4 shrink-0 justify-center">
+                  {speakers.map(user => {
+                    const conn = useAppStore.getState().voiceConnections?.[user.id];
+                    const isMe = user.id === 'u1';
+                    return (
+                      <div key={user.id} className="w-48 shrink-0">
+                        <SpeakerCard 
+                          user={user} 
+                          isMe={isMe} 
+                          isMuted={conn?.isMuted || false}
+                          isSpeaking={!!conn?.isSpeaking && !conn?.isMuted}
+                          videoStream={isMe ? webcamStream : null}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              // Grid Mode (Avatars & Webcams)
+              <div className="flex-1 flex items-center justify-center min-h-0">
+                <div className="max-w-6xl w-full mx-auto">
+                  <div className={cn(
+                    "grid gap-4",
+                    speakers.length === 1 ? "grid-cols-1 max-w-xl mx-auto" :
+                    speakers.length === 2 ? "grid-cols-2" :
+                    speakers.length <= 4 ? "grid-cols-2" :
+                    "grid-cols-3 lg:grid-cols-4"
+                  )}>
+                    {speakers.map(user => {
+                      const conn = useAppStore.getState().voiceConnections?.[user.id];
+                      const isMe = user.id === 'u1';
+                      return (
+                        <SpeakerCard 
+                          key={user.id} 
+                          user={user} 
+                          isMe={isMe} 
+                          isMuted={conn?.isMuted || false}
+                          isSpeaking={!!conn?.isSpeaking && !conn?.isMuted}
+                          videoStream={isMe ? webcamStream : null}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Audience Section */}
+            {isStage && audience.length > 0 && (
+              <div className="max-w-6xl mx-auto w-full border-t border-white/5 pt-6 shrink-0">
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-6">
+                  {audience.map(user => (
+                    <div key={user.id} className="flex flex-col items-center gap-2 group relative">
+                      <div className="relative">
+                        <Avatar src={user.avatarUrl} alt={user.username} size="lg" className="ring-2 ring-transparent group-hover:ring-[#313338] transition-all" />
+                        {requests.includes(user.id) && (
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-[#5865f2] text-white rounded-full flex items-center justify-center border-2 border-[#1e1f22] shadow-lg">
+                            <Mic size={10} />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium text-text-secondary truncate w-full text-center group-hover:text-white transition-colors">{user.username}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Control Bar */}
+      <AnimatePresence>
+        {isConnected && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            className="absolute bottom-8 left-1/2 -translate-x-1/2 z-30"
+          >
+            <VoiceControlBar
+              isMuted={voiceState.isMuted}
+              isDeafened={voiceState.isDeafened}
+              isVideoOff={callState.isVideoOff}
+              isScreenSharing={isScreenSharing}
+              isStage={isStage}
+              isUserSpeaker={isUserSpeaker}
+              hasRequested={hasRequested}
+              toggleMute={toggleMute}
+              toggleDeafen={toggleDeafen}
+              toggleCallVideo={toggleCallVideo}
+              handleToggleScreenShare={handleToggleScreenShare}
+              setSettingsOpen={setSettingsOpen}
+              requestToSpeak={requestToSpeak}
+              leaveVoiceChannel={leaveVoiceChannel}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Screen Share Configuration Modal */}
+      <ShareScreenModal 
+        isOpen={isShareModalOpen} 
+        onClose={() => setIsShareModalOpen(false)} 
+        onShare={handleStartShare} 
+      />
+    </div>
+  );
+}
